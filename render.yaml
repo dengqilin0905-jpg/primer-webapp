@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: primer-webapp
+    runtime: docker
+    plan: starter  # persistent disk requires a paid plan
+    disk:
+      name: primer-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DB_PATH
+        value: /data/app.db
+      - key: APP_PASSWORD
+        sync: false
