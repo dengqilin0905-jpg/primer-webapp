@@ -1,0 +1,85 @@
+name: Build Windows Portable (no Python install for users)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "**/*.py"
+      - "requirements.txt"
+      - "sangon_template.xlsx"
+      - "portable/**"
+      - ".github/workflows/build-windows-portable.yml"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare portable folder
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path dist_portable | Out-Null
+
+      - name: Download Python Embeddable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pyVer = "3.11.9"
+          $url = "https://www.python.org/ftp/python/$pyVer/python-$pyVer-embed-amd64.zip"
+          $zip = "python-embed.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath dist_portable\python -Force
+
+      - name: Install pip into embeddable Python
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $getPip = "get-pip.py"
+          Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPip
+          & dist_portable\python\python.exe $getPip --no-warn-script-location
+
+          # Ensure embeddable python loads site-packages
+          $pth = Get-ChildItem dist_portable\python\python*._pth | Select-Object -First 1
+          if (-not $pth) { throw "Could not find python._pth" }
+          $lines = Get-Content $pth.FullName
+          if ($lines -notcontains "import site") { Add-Content $pth.FullName "import site" }
+
+      - name: Install dependencies (portable target)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path dist_portable\app\_deps | Out-Null
+          & dist_portable\python\python.exe -m pip install --upgrade pip
+          & dist_portable\python\python.exe -m pip install -r requirements.txt --target dist_portable\app\_deps
+
+      - name: Copy app files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path dist_portable\app | Out-Null
+          Copy-Item -Recurse -Force *.py dist_portable\app\
+          Copy-Item -Force requirements.txt dist_portable\app\
+          if (Test-Path "sangon_template.xlsx") { Copy-Item -Force sangon_template.xlsx dist_portable\app\ }
+
+      - name: Add launcher + README
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Copy-Item -Force portable\run.bat dist_portable\run.bat
+          Copy-Item -Force portable\README_portable.txt dist_portable\README.txt
+
+      - name: Zip artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Compress-Archive -Path dist_portable\* -DestinationPath primer-webapp-portable-win.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: primer-webapp-portable-win
+          path: primer-webapp-portable-win.zip
