@@ -22,7 +22,7 @@ REM ====== Port ======
 set "PORT=18501"
 
 REM ====== Start Streamlit in a new window ======
-start "PrimerWebApp" "%PY%" -m streamlit run "%APP%\app.py" --server.address 127.0.0.1 --server.port %PORT% --server.headless true
+start "PrimerWebApp" "%PY%" -m streamlit run "%APP%\app.py" --server.address 127.0.0.1 --server.port %PORT% --server.headless true --global.developmentMode=false
 
 REM ====== Open browser ======
 timeout /t 2 >nul
