@@ -1,0 +1,6 @@
+streamlit>=1.35
+openpyxl>=3.1
+biopython>=1.83
+pandas>=2.0
+# Optional: enable SnapGene .dna parsing; if it fails to install, .dna uploads will be skipped with a message.
+snapgene-reader==0.1.23

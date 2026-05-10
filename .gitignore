@@ -1,0 +1,50 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual envs
+.venv/
+venv/
+
+# Local DB and state
+app/app.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets and env
+.env
+.env.server
+.streamlit/secrets.toml
+*.pem
+*.key
+
+# Portable bundle/deps (do not publish)
+app/_deps/
+python/
+
+# Build/temp/runtime outputs
+tmp/
+temp/
+*.tmp
+*.log
+
+# User uploads / generated exports (if used)
+uploads/
+exports/
+output/
+
+# Server temp files
+/tmp/primer-webapp/
+app/_tmp/
+
+# Private data (customize as needed)
+private_data/
+jbrowse-private/
+
+# OS/editor artifacts
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
