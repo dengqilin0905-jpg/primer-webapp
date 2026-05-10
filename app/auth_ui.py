@@ -1,6 +1,6 @@
 import time, os, base64, hashlib
 import streamlit as st
-from db import get_conn
+from db import get_conn, get_app_setting, set_app_setting
 
 def _hash_password(pw: str, salt: bytes) -> str:
     dk = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), salt, 120_000)
@@ -24,10 +24,22 @@ def logout():
 def login_box():
     st.sidebar.header("Account")
     tab1, tab2 = st.sidebar.tabs(["Login", "Register"])
+    if "remember_username" not in st.session_state:
+        conn = get_conn()
+        remembered = get_app_setting(conn, "remember_username", "")
+        conn.close()
+        st.session_state["remember_username"] = remembered or ""
 
     with tab1:
+        if "login_u" not in st.session_state and st.session_state["remember_username"]:
+            st.session_state["login_u"] = st.session_state["remember_username"]
         u = st.text_input("Username", key="login_u")
         p = st.text_input("Password", type="password", key="login_p")
+        remember_u = st.checkbox(
+            "Remember username on this device",
+            value=bool(st.session_state.get("remember_username")),
+            key="remember_username_check",
+        )
         if st.button("Login"):
             conn = get_conn()
             row = conn.execute("SELECT * FROM users WHERE username=?", (u.strip(),)).fetchone()
@@ -36,6 +48,12 @@ def login_box():
             else:
                 if _verify_password(p, row["password_hash"]):
                     st.session_state["user"] = {"id": row["id"], "username": row["username"]}
+                    if remember_u and u.strip():
+                        set_app_setting(conn, "remember_username", u.strip())
+                        st.session_state["remember_username"] = u.strip()
+                    else:
+                        set_app_setting(conn, "remember_username", None)
+                        st.session_state["remember_username"] = ""
                     st.success("Logged in.")
                     st.rerun()
                 else:
