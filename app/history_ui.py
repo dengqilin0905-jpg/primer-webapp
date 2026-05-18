@@ -1,9 +1,13 @@
 import json
+import math
+
 import streamlit as st
+
 from db import get_conn
 from excel_export import TEMPLATE_PATH, export_from_template_bytes, validate_primer_rows
-from fragment_export import build_fragment_length_txt, build_fragment_length_simple_txt, build_non_cds_amplicon_fasta
-from templates_ui import get_user_templates, get_default_template_id, get_effective_template_bytes
+from fragment_export import build_fragment_length_simple_txt, build_fragment_length_txt, build_non_cds_amplicon_fasta
+from genbank_export import build_genbank_bundle
+from templates_ui import get_default_template_id, get_effective_template_bytes, get_user_templates
 
 
 def _fmt_tm(v, label):
@@ -15,7 +19,10 @@ def _fmt_tm(v, label):
     except Exception:
         return f"{label} NA"
     try:
-        return f"{label} {float(v):.2f}"
+        vf = float(v)
+        if math.isnan(vf):
+            return f"{label} NA"
+        return f"{label} {vf:.2f}"
     except Exception:
         return f"{label} NA"
 
@@ -29,7 +36,10 @@ def _fmt_delta(v):
     except Exception:
         return "dTm NA"
     try:
-        return f"dTm {float(v):.2f}"
+        vf = float(v)
+        if math.isnan(vf):
+            return "dTm NA"
+        return f"dTm {vf:.2f}"
     except Exception:
         return "dTm NA"
 
@@ -45,9 +55,10 @@ def history_page(user, config):
 
     runs = conn.execute(
         """
-        SELECT r.id, r.created_at, r.note, r.params_json, b.name AS backbone_name, b.enzyme_sites
+        SELECT r.id, r.created_at, r.note, r.params_json, r.status,
+               b.name AS backbone_name, b.enzyme_sites
         FROM primer_runs r
-        JOIN backbones b ON b.id = r.backbone_id
+        LEFT JOIN backbones b ON b.id = r.backbone_id
         WHERE r.user_id=?
         ORDER BY r.id DESC
         LIMIT 200
@@ -64,7 +75,12 @@ def history_page(user, config):
     selected_run = st.selectbox("Select a run", run_ids, format_func=lambda rid: f"Run {rid}", key="history_run_pick")
     rrow = next(r for r in runs if r["id"] == selected_run)
 
-    st.write(f"Backbone: **{_bb_label(rrow)}**")
+    status = str(rrow["status"] or "pending")
+    st.write(f"Status: **{status}**")
+    if rrow["backbone_name"]:
+        st.write(f"Backbone: **{_bb_label(rrow)}**")
+    else:
+        st.write("Backbone: **mixed/legacy**")
     st.write(f"Created: {rrow['created_at']}")
     if rrow["note"]:
         st.write(f"Note: {rrow['note']}")
@@ -72,21 +88,15 @@ def history_page(user, config):
         params = json.loads(rrow["params_json"] or "{}")
     except Exception:
         params = {}
-    if params.get("seq_type"):
-        st.caption(f"Sequence type: {params.get('seq_type')}")
-    if "remove_stop" in params:
-        rs = "Yes" if bool(params.get("remove_stop")) else "No"
-        st.caption(f"Remove stop codon (CDS): {rs}")
+    if params.get("batch_mode"):
+        st.caption(f"Batch mode: {params.get('batch_mode')}")
+    if params.get("combo_count"):
+        st.caption(f"Combinations: {params.get('combo_count')}")
     if params.get("tm_profile"):
         st.caption(f"Tm profile: {params.get('tm_profile')}")
-    if params.get("tm_calc_method"):
-        st.caption(f"Tm method: {params.get('tm_calc_method')}")
-    if "tm_pair_delta_max" in params:
-        st.caption(f"Max |TmF-TmR| (soft): {params.get('tm_pair_delta_max')}")
-    seq_type = params.get("seq_type", "")
-    remove_stop = bool(params.get("remove_stop")) if "remove_stop" in params else ""
+    if params.get("construct_type"):
+        st.caption(f"Construct type: {params.get('construct_type')}")
 
-    # Delete controls
     dcol1, dcol2, dcol3 = st.columns([2, 3, 3])
     with dcol1:
         if st.button("Delete this run", key="history_delete_current"):
@@ -105,10 +115,7 @@ def history_page(user, config):
                 st.warning("Please confirm batch deletion first.")
             else:
                 placeholders = ",".join("?" for _ in batch_del)
-                conn.execute(
-                    f"DELETE FROM primer_runs WHERE user_id=? AND id IN ({placeholders})",
-                    [user["id"], *batch_del],
-                )
+                conn.execute(f"DELETE FROM primer_runs WHERE user_id=? AND id IN ({placeholders})", [user["id"], *batch_del])
                 conn.commit()
                 st.success(f"Deleted {len(batch_del)} run(s).")
                 st.rerun()
@@ -118,10 +125,24 @@ def history_page(user, config):
 
     primers = conn.execute(
         """
-        SELECT p.*, g.gene_name
+        SELECT
+            p.*,
+            g.gene_name,
+            b.name AS backbone_name,
+            b.enzyme_sites,
+            b.homo_f,
+            b.homo_r,
+            b.vector_sequence,
+            b.insertion_mode,
+            b.restriction_site_f,
+            b.restriction_site_r,
+            b.junction_extra_bases_f,
+            b.junction_extra_bases_r,
+            b.vector_map_note
         FROM primers p
         JOIN genes g ON g.id = p.gene_id
         JOIN primer_runs r ON r.id = p.run_id
+        LEFT JOIN backbones b ON b.id = p.backbone_id
         WHERE p.run_id=? AND r.user_id=? AND g.user_id=?
         ORDER BY p.id ASC
         """,
@@ -130,14 +151,17 @@ def history_page(user, config):
 
     st.markdown("#### Primers")
     for p in primers[:200]:
-        cols = st.columns([3, 2, 2, 2, 2, 3])
+        cols = st.columns([3, 3, 2, 2, 2, 3])
         cols[0].write(f"**{p['gene_name']}**")
-        cols[1].write(_fmt_tm(p["tm_f"], "TmF"))
-        cols[2].write(_fmt_tm(p["tm_r"], "TmR"))
-        cols[3].write(f"Amp {p['amplicon_len'] if p['amplicon_len'] is not None else 'NA'} bp")
+        bb_name = p["backbone_name"] if p["backbone_name"] else "N/A"
+        cols[1].write(bb_name)
+        cols[2].write(_fmt_tm(p["tm_f"], "TmF"))
+        cols[3].write(_fmt_tm(p["tm_r"], "TmR"))
         cols[4].write(_fmt_delta(p["tm_delta"]))
-        cols[5].write(f"Reason: {p['selected_reason'] or 'NA'}")
+        cols[5].write(f"Amp {p['amplicon_len'] if p['amplicon_len'] is not None else 'NA'} bp")
         st.code(f"{p['primer_name_f']}: {p['final_f']}\n{p['primer_name_r']}: {p['final_r']}", language="text")
+        if p["warnings"]:
+            st.caption(f"Warnings: {p['warnings']}")
 
     if len(primers) > 200:
         st.info(f"Showing first 200 primer pairs out of {len(primers)} pairs.")
@@ -157,10 +181,12 @@ def history_page(user, config):
                 "bind_start_r": p["bind_start_r"],
                 "bind_end_r": p["bind_end_r"],
                 "amplicon_seq": p["amplicon_seq"] or "",
-                "backbone_name": rrow["backbone_name"],
+                "insert_seq": p["insert_seq"] or "",
+                "backbone_name": p["backbone_name"] or "",
                 "gene_name": p["gene_name"],
-                "seq_type": seq_type,
-                "remove_stop": remove_stop,
+                "seq_type": p["seq_type"] or params.get("seq_type", ""),
+                "remove_stop": bool(p["remove_stop"]) if p["remove_stop"] is not None else bool(params.get("remove_stop", False)),
+                "construct_type": p["construct_type"] or params.get("construct_type", ""),
                 "amplicon_len": p["amplicon_len"],
                 "tm_f": p["tm_f"],
                 "tm_r": p["tm_r"],
@@ -169,6 +195,15 @@ def history_page(user, config):
                 "rescue_tier": p["rescue_tier"] or "",
                 "warnings": p["warnings"] or "",
                 "selected_reason": p["selected_reason"] or "",
+                "homo_f": p["homo_f"] or "",
+                "homo_r": p["homo_r"] or "",
+                "vector_sequence": p["vector_sequence"] or "",
+                "insertion_mode": p["insertion_mode"] or "linear_join",
+                "restriction_site_f": p["restriction_site_f"] or "",
+                "restriction_site_r": p["restriction_site_r"] or "",
+                "junction_extra_bases_f": int(p["junction_extra_bases_f"] or 0),
+                "junction_extra_bases_r": int(p["junction_extra_bases_r"] or 0),
+                "vector_map_note": p["vector_map_note"] or "",
             }
         )
 
@@ -198,9 +233,7 @@ def history_page(user, config):
             template_bytes = TEMPLATE_PATH.read_bytes()
             template_label = "Built-in template"
         else:
-            template_bytes, template_label = get_effective_template_bytes(
-                conn, int(user["id"]), int(selected_template_key)
-            )
+            template_bytes, template_label = get_effective_template_bytes(conn, int(user["id"]), int(selected_template_key))
         xbytes = export_from_template_bytes(primer_rows, template_bytes=template_bytes, profile=profile)
         st.download_button(
             "Download Sangon Excel (Template)",
@@ -233,7 +266,17 @@ def history_page(user, config):
             )
         else:
             st.info("This run has no non-CDS amplicon sequences.")
-    except Exception as e:
-        st.error(f"Re-export blocked by validation: {e}")
+
+        gb_name, gb_data, gb_mime = build_genbank_bundle(primer_rows)
+        st.download_button(
+            "Download GenBank map",
+            data=gb_data,
+            file_name=f"Run_{selected_run}_{gb_name}",
+            mime=gb_mime,
+            key=f"history_download_genbank_{selected_run}",
+        )
+    except Exception as exc:
+        st.error(f"Re-export blocked by validation: {exc}")
 
     conn.close()
+

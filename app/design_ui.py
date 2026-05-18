@@ -1,12 +1,16 @@
-﻿import time
 import json
 import re
+import time
+from typing import Any
+
 import streamlit as st
+
 from db import get_conn
-from primer_design import design_primers_for_gene
 from excel_export import TEMPLATE_PATH, export_from_template_bytes, validate_primer_rows
-from fragment_export import build_fragment_length_txt, build_fragment_length_simple_txt, build_non_cds_amplicon_fasta
-from templates_ui import get_user_templates, get_default_template_id, get_effective_template_bytes
+from fragment_export import build_fragment_length_simple_txt, build_fragment_length_txt, build_non_cds_amplicon_fasta
+from genbank_export import build_genbank_bundle
+from primer_design import design_primers_for_gene
+from templates_ui import get_default_template_id, get_effective_template_bytes, get_user_templates
 
 
 def _sanitize_name(s: str) -> str:
@@ -87,8 +91,51 @@ def _build_preview_rows(mapping_cart):
     return out
 
 
+def _flatten_combos(mapping_cart) -> list[dict[str, Any]]:
+    combos = []
+    for item in mapping_cart:
+        seq_type = str(item.get("seq_type") or "CDS")
+        remove_stop = bool(item.get("remove_stop")) if seq_type.upper() == "CDS" else False
+        for gene in item.get("gene_names", []):
+            combos.append(
+                {
+                    "backbone_id": int(item["backbone_id"]),
+                    "backbone_name": item["backbone_name"],
+                    "backbone_label": item["backbone_label"],
+                    "gene_name": gene,
+                    "seq_type": seq_type,
+                    "remove_stop": remove_stop,
+                }
+            )
+    return combos
+
+
+def _cartesian_items(backbones, backbone_ids, genes, seq_type, remove_stop):
+    by_id = {int(b["id"]): b for b in backbones}
+    items = []
+    for bid in backbone_ids:
+        bb = by_id.get(int(bid))
+        if not bb:
+            continue
+        items.append(
+            {
+                "backbone_id": int(bb["id"]),
+                "backbone_name": bb["name"],
+                "backbone_label": _bb_label(bb),
+                "gene_names": list(genes),
+                "seq_type": seq_type,
+                "remove_stop": bool(remove_stop) if seq_type == "CDS" else False,
+            }
+        )
+    return items
+
+
+def _format_batch_mode(x: str) -> str:
+    return {"mapping": "Mapping (existing)", "cartesian": "Cartesian (Gene × Backbone)"}.get(x, x)
+
+
 def design_page(user, config):
-    st.subheader("Design (Mapping-based batch)")
+    st.subheader("Design (Batch)")
     conn = get_conn()
 
     prof = conn.execute("SELECT * FROM user_profiles WHERE user_id=?", (user["id"],)).fetchone()
@@ -108,11 +155,7 @@ def design_page(user, config):
     st.markdown("#### Parameters")
     col1, col2, col3 = st.columns(3)
     with col1:
-        default_seq_type = st.selectbox(
-            "Default sequence type for new mapping",
-            ["CDS", "Promoter", "Other"],
-            key="design_default_seq_type",
-        )
+        default_seq_type = st.selectbox("Default sequence type", ["CDS", "Promoter", "Other"], key="design_default_seq_type")
         default_remove_stop = st.checkbox(
             "Default remove terminal stop codon (CDS only)",
             value=bool(defaults.get("remove_stop", True)),
@@ -137,6 +180,20 @@ def design_page(user, config):
             tm_profile = "snapgene_preset"
             Na, Mg, dNTPs, primer_conc = 50.0, 1.5, 0.2, 250.0
             st.caption("Preset params: Na=50.0 mM, Mg=1.5 mM, dNTPs=0.2 mM, primer=250 nM")
+
+    st.markdown("#### Advanced frame check")
+    cfa, cfb, cfc = st.columns(3)
+    with cfa:
+        enable_frame_check = st.checkbox("enable_frame_check", value=False, key="design_enable_frame_check")
+    with cfb:
+        construct_type = st.selectbox(
+            "construct_type",
+            ["CDS_no_tag", "N_terminal_tag", "C_terminal_tag", "promoter_or_non_coding"],
+            key="design_construct_type",
+        )
+    with cfc:
+        st.caption("Frame check applies warnings into result, History, and Excel remarks.")
+
     policy_defaults = {
         "gc_min": 40.0,
         "gc_max": 60.0,
@@ -152,7 +209,6 @@ def design_page(user, config):
     }
     st.caption("Design policy: Tm-priority + GC 40-60 hard filter + adaptive soft length preference + soft |TmF-TmR| + CDS auto recovery.")
 
-    st.markdown("#### Build mapping (Backbone -> Genes)")
     search = st.text_input("Filter genes by name (optional)", key="design_gene_filter")
     if search:
         genes = conn.execute(
@@ -165,148 +221,110 @@ def design_page(user, config):
             (user["id"],),
         ).fetchall()
 
+    batch_mode = st.radio("Batch mode", ["mapping", "cartesian"], format_func=_format_batch_mode, horizontal=True, key="design_batch_mode")
+
     if "mapping_cart" not in st.session_state:
         st.session_state["mapping_cart"] = []
     st.session_state["mapping_cart"] = _normalize_mapping_cart(st.session_state["mapping_cart"], backbones)
 
-    backbone_options = { _bb_label(b): int(b["id"]) for b in backbones }
-    picked_label = st.selectbox("Select backbone (one at a time)", list(backbone_options.keys()), key="design_backbone_pick")
-    picked_id = backbone_options[picked_label]
-    picked_bb = next(b for b in backbones if int(b["id"]) == picked_id)
+    cart_items = []
+    if batch_mode == "mapping":
+        st.markdown("#### Build mapping (Backbone -> Genes)")
+        backbone_options = {_bb_label(b): int(b["id"]) for b in backbones}
+        picked_label = st.selectbox("Select backbone (one at a time)", list(backbone_options.keys()), key="design_backbone_pick")
+        picked_id = backbone_options[picked_label]
+        picked_bb = next(b for b in backbones if int(b["id"]) == picked_id)
 
-    selected_genes = st.multiselect(
-        "Select genes for this backbone",
-        [g["gene_name"] for g in genes],
-        key="design_selected_genes",
-    )
-
-    option_cols = st.columns([2, 2, 3])
-    with option_cols[0]:
-        map_seq_type = st.selectbox(
-            "Sequence type for this mapping",
-            ["CDS", "Promoter", "Other"],
-            index=["CDS", "Promoter", "Other"].index(default_seq_type),
-            key="design_map_seq_type",
-        )
-    with option_cols[1]:
-        map_remove_stop = st.checkbox(
-            "Remove stop",
-            value=bool(default_remove_stop),
-            key="design_map_remove_stop",
-            disabled=(map_seq_type != "CDS"),
-            help="Only applies to CDS mappings.",
-        )
-    with option_cols[2]:
-        st.caption("Add mapping with its own sequence type and stop-codon handling.")
-
-    c1, c2, c3 = st.columns([1, 1, 2])
-    with c1:
-        if st.button("Add to batch", key="design_add_batch"):
-            if not selected_genes:
-                st.warning("Please select at least one gene.")
-            else:
-                effective_remove_stop = bool(map_remove_stop) if map_seq_type == "CDS" else False
-                st.session_state["mapping_cart"].append(
-                    {
-                        "backbone_id": int(picked_bb["id"]),
-                        "backbone_name": picked_bb["name"],
-                        "backbone_label": _bb_label(picked_bb),
-                        "gene_names": selected_genes,
-                        "seq_type": map_seq_type,
-                        "remove_stop": effective_remove_stop,
-                    }
-                )
-                st.success(
-                    f"Added: {_bb_label(picked_bb)} -> {len(selected_genes)} genes "
-                    f"[{map_seq_type}, remove_stop={_remove_stop_label(map_seq_type, effective_remove_stop)}]"
-                )
-    with c2:
-        if st.button("Clear batch", key="design_clear_batch"):
-            st.session_state["mapping_cart"] = []
-            st.success("Cleared.")
-    with c3:
-        st.caption("You control pairing directly. No forced Cartesian product.")
-
-    if st.session_state["mapping_cart"]:
-        st.markdown("##### Current batch mapping")
-        for idx, item in enumerate(st.session_state["mapping_cart"], start=1):
-            cols = st.columns([3, 5, 3, 1])
-            cols[0].write(f"{idx}. **{item['backbone_label']}**")
-            cols[1].write(", ".join(item["gene_names"]))
-            cols[2].write(
-                f"{item['seq_type']} | remove_stop={_remove_stop_label(item['seq_type'], bool(item.get('remove_stop')))}"
+        selected_genes = st.multiselect("Select genes for this backbone", [g["gene_name"] for g in genes], key="design_selected_genes")
+        option_cols = st.columns([2, 2, 3])
+        with option_cols[0]:
+            map_seq_type = st.selectbox(
+                "Sequence type for this mapping",
+                ["CDS", "Promoter", "Other"],
+                index=["CDS", "Promoter", "Other"].index(default_seq_type),
+                key="design_map_seq_type",
             )
-            if cols[3].button("X", key=f"rm_{idx}"):
-                st.session_state["mapping_cart"].pop(idx - 1)
-                st.rerun()
-    else:
-        st.info("Batch is empty. Add at least one mapping above.")
+        with option_cols[1]:
+            map_remove_stop = st.checkbox(
+                "Remove stop",
+                value=bool(default_remove_stop),
+                key="design_map_remove_stop",
+                disabled=(map_seq_type != "CDS"),
+                help="Only applies to CDS mappings.",
+            )
+        with option_cols[2]:
+            st.caption("Add mapping with its own sequence type and stop-codon handling.")
 
-    preview_rows = _build_preview_rows(st.session_state["mapping_cart"])
-    if preview_rows:
-        st.markdown("##### Batch preview")
+        c1, c2, c3 = st.columns([1, 1, 2])
+        with c1:
+            if st.button("Add to batch", key="design_add_batch"):
+                if not selected_genes:
+                    st.warning("Please select at least one gene.")
+                else:
+                    effective_remove_stop = bool(map_remove_stop) if map_seq_type == "CDS" else False
+                    st.session_state["mapping_cart"].append(
+                        {
+                            "backbone_id": int(picked_bb["id"]),
+                            "backbone_name": picked_bb["name"],
+                            "backbone_label": _bb_label(picked_bb),
+                            "gene_names": selected_genes,
+                            "seq_type": map_seq_type,
+                            "remove_stop": effective_remove_stop,
+                        }
+                    )
+                    st.success(
+                        f"Added: {_bb_label(picked_bb)} -> {len(selected_genes)} genes "
+                        f"[{map_seq_type}, remove_stop={_remove_stop_label(map_seq_type, effective_remove_stop)}]"
+                    )
+        with c2:
+            if st.button("Clear batch", key="design_clear_batch"):
+                st.session_state["mapping_cart"] = []
+                st.success("Cleared.")
+        with c3:
+            st.caption("Mapping mode keeps per-backbone parameter control.")
+
+        cart_items = st.session_state["mapping_cart"]
+    else:
+        st.markdown("#### Cartesian build (Gene × Backbone)")
+        bb_options = {_bb_label(b): int(b["id"]) for b in backbones}
+        cart_backbone_labels = st.multiselect("Select backbones", list(bb_options.keys()), key="design_cart_backbones")
+        cart_gene_names = st.multiselect("Select genes", [g["gene_name"] for g in genes], key="design_cart_genes")
+        c1, c2 = st.columns(2)
+        with c1:
+            cart_seq_type = st.selectbox("Sequence type", ["CDS", "Promoter", "Other"], key="design_cart_seq_type")
+        with c2:
+            cart_remove_stop = st.checkbox(
+                "Remove stop (CDS only)",
+                value=bool(default_remove_stop),
+                disabled=(cart_seq_type != "CDS"),
+                key="design_cart_remove_stop",
+            )
+        cart_ids = [bb_options[x] for x in cart_backbone_labels]
+        cart_items = _cartesian_items(backbones, cart_ids, cart_gene_names, cart_seq_type, cart_remove_stop)
+        st.caption(f"Cartesian combinations: {len(cart_gene_names)} genes × {len(cart_ids)} backbones.")
+
+    if cart_items:
+        st.markdown("##### Current batch preview")
+        preview_rows = _build_preview_rows(cart_items)
         st.dataframe(preview_rows, use_container_width=True)
+    else:
+        st.info("Batch is empty. Add at least one mapping/combination.")
 
     note = st.text_input("Run note (optional)", key="design_run_note")
 
-    if st.button("Generate primers for batch mapping", key="design_run"):
-        if not st.session_state["mapping_cart"]:
+    if st.button("Generate primers for current batch", key="design_run"):
+        if not cart_items:
             st.warning("Batch is empty.")
         else:
-            group_tag = time.strftime("%Y%m%d_%H%M%S")
-            base_note = (note or "").strip()
-            run_ids = []
-            all_results = []
-            failures = []
-
-            all_genes = conn.execute(
-                "SELECT id, gene_name, sequence FROM genes WHERE user_id=? ORDER BY id",
-                (user["id"],),
-            ).fetchall()
-            gene_by_name = {g["gene_name"]: g for g in all_genes}
-
-            total_steps = sum(len(it["gene_names"]) for it in st.session_state["mapping_cart"])
-            total_steps = max(1, total_steps)
-            done = 0
-            prog = st.progress(0.0)
-
-            backbones_by_id = {int(b["id"]): b for b in backbones}
-
-            for item in st.session_state["mapping_cart"]:
-                bb = backbones_by_id.get(int(item["backbone_id"]))
-                if bb is None:
-                    failures.append(
-                        {
-                            "backbone": item.get("backbone_label", str(item.get("backbone_id"))),
-                            "gene": ",".join(item.get("gene_names", [])),
-                            "seq_type": item.get("seq_type", ""),
-                            "remove_stop": _remove_stop_label(item.get("seq_type", ""), bool(item.get("remove_stop"))),
-                            "reason": "Backbone no longer exists.",
-                        }
-                    )
-                    done += len(item.get("gene_names", []))
-                    prog.progress(done / total_steps)
-                    continue
-
-                gene_list = [gene_by_name[n] for n in item["gene_names"] if n in gene_by_name]
-                missing_names = [n for n in item["gene_names"] if n not in gene_by_name]
-                for mn in missing_names:
-                    failures.append(
-                        {
-                            "backbone": item["backbone_label"],
-                            "gene": mn,
-                            "seq_type": item.get("seq_type", ""),
-                            "remove_stop": _remove_stop_label(item.get("seq_type", ""), bool(item.get("remove_stop"))),
-                            "reason": "Gene no longer exists in database.",
-                        }
-                    )
-
-                item_seq_type = str(item.get("seq_type") or "CDS")
-                item_remove_stop = bool(item.get("remove_stop")) if item_seq_type.upper() == "CDS" else False
-
+            combos = _flatten_combos(cart_items)
+            if not combos:
+                st.warning("No valid combinations generated.")
+            else:
+                run_note = (note or "").strip()
+                first_backbone_id = int(combos[0]["backbone_id"])
                 params = dict(
-                    seq_type=item_seq_type,
-                    remove_stop=item_remove_stop,
+                    batch_mode=batch_mode,
+                    combo_count=len(combos),
                     min_len=int(min_len),
                     max_len=int(max_len),
                     tm_min=float(tm_min),
@@ -317,34 +335,79 @@ def design_page(user, config):
                     dNTPs=float(dNTPs),
                     primer_conc=float(primer_conc),
                     tm_calc_method="Biopython_Tm_NN",
+                    enable_frame_check=bool(enable_frame_check),
+                    construct_type=construct_type,
+                    mappings=cart_items,
                     **policy_defaults,
                 )
-
                 cur = conn.cursor()
-                run_note = f"[group:{group_tag}] " + (base_note if base_note else "")
                 cur.execute(
-                    "INSERT INTO primer_runs(user_id, backbone_id, params_json, created_at, note) VALUES(?,?,?,?,?)",
+                    """
+                    INSERT INTO primer_runs(user_id, backbone_id, params_json, created_at, note, status)
+                    VALUES(?,?,?,?,?,?)
+                    """,
                     (
                         user["id"],
-                        bb["id"],
+                        first_backbone_id,
                         json.dumps(params, ensure_ascii=False),
                         time.strftime("%Y-%m-%d %H:%M:%S"),
                         run_note or None,
+                        "pending",
                     ),
                 )
-                run_id = cur.lastrowid
+                run_id = int(cur.lastrowid)
                 conn.commit()
-                run_ids.append(run_id)
 
-                for g in gene_list:
+                all_results = []
+                failures = []
+                all_genes = conn.execute(
+                    "SELECT id, gene_name, sequence FROM genes WHERE user_id=? ORDER BY id",
+                    (user["id"],),
+                ).fetchall()
+                gene_by_name = {g["gene_name"]: g for g in all_genes}
+                backbones_by_id = {int(b["id"]): b for b in backbones}
+                total_steps = max(1, len(combos))
+                done = 0
+                prog = st.progress(0.0)
+
+                for combo in combos:
+                    bb = backbones_by_id.get(int(combo["backbone_id"]))
+                    g = gene_by_name.get(combo["gene_name"])
+                    if bb is None:
+                        failures.append(
+                            {
+                                "backbone": combo.get("backbone_label", str(combo.get("backbone_id"))),
+                                "gene": combo["gene_name"],
+                                "seq_type": combo["seq_type"],
+                                "remove_stop": _remove_stop_label(combo["seq_type"], bool(combo["remove_stop"])),
+                                "reason": "Backbone no longer exists.",
+                            }
+                        )
+                        done += 1
+                        prog.progress(done / total_steps)
+                        continue
+                    if g is None:
+                        failures.append(
+                            {
+                                "backbone": combo["backbone_label"],
+                                "gene": combo["gene_name"],
+                                "seq_type": combo["seq_type"],
+                                "remove_stop": _remove_stop_label(combo["seq_type"], bool(combo["remove_stop"])),
+                                "reason": "Gene no longer exists in database.",
+                            }
+                        )
+                        done += 1
+                        prog.progress(done / total_steps)
+                        continue
+
                     try:
                         out = design_primers_for_gene(
                             gene_name=g["gene_name"],
                             seq=g["sequence"],
                             homo_f=bb["homo_f"],
                             homo_r=bb["homo_r"],
-                            seq_type=item_seq_type,
-                            remove_stop=item_remove_stop,
+                            seq_type=combo["seq_type"],
+                            remove_stop=bool(combo["remove_stop"]),
                             min_len=int(min_len),
                             max_len=int(max_len),
                             tm_min=float(tm_min),
@@ -365,29 +428,51 @@ def design_page(user, config):
                             tm_delta_mode=str(policy_defaults["tm_delta_mode"]),
                             tm_profile=str(policy_defaults["tm_profile"]),
                             cds_recovery_enable=bool(policy_defaults["cds_recovery_enable"]),
+                            enable_frame_check=bool(enable_frame_check),
+                            construct_type=construct_type,
+                            restriction_site_f=bb["restriction_site_f"],
+                            restriction_site_r=bb["restriction_site_r"],
+                            junction_extra_bases_f=int(bb["junction_extra_bases_f"] or 0),
+                            junction_extra_bases_r=int(bb["junction_extra_bases_r"] or 0),
                         )
                         out["primer_name_f"] = _primer_name(bb["name"], g["gene_name"], "F")
                         out["primer_name_r"] = _primer_name(bb["name"], g["gene_name"], "R")
                         out["gene_id"] = g["id"]
+                        out["backbone_id"] = int(bb["id"])
                         out["backbone_name"] = bb["name"]
                         out["backbone_label"] = _bb_label(bb)
                         out["gene_name"] = g["gene_name"]
-                        out["seq_type"] = item_seq_type
-                        out["remove_stop"] = item_remove_stop
+                        out["seq_type"] = combo["seq_type"]
+                        out["remove_stop"] = bool(combo["remove_stop"])
+                        out["construct_type"] = construct_type
+                        out["homo_f"] = bb["homo_f"]
+                        out["homo_r"] = bb["homo_r"]
+                        out["vector_sequence"] = bb["vector_sequence"]
+                        out["insertion_mode"] = bb["insertion_mode"]
+                        out["restriction_site_f"] = bb["restriction_site_f"]
+                        out["restriction_site_r"] = bb["restriction_site_r"]
+                        out["junction_extra_bases_f"] = int(bb["junction_extra_bases_f"] or 0)
+                        out["junction_extra_bases_r"] = int(bb["junction_extra_bases_r"] or 0)
+                        out["vector_map_note"] = bb["vector_map_note"]
                         all_results.append(out)
 
                         conn.execute(
                             """
-                            INSERT INTO primers(run_id, gene_id, primer_name_f, primer_name_r,
-                                                gene_bind_f, gene_bind_r, final_f, final_r,
-                                                bind_start_f, bind_end_f, bind_start_r, bind_end_r, amplicon_seq,
-                                                tm_f, tm_r, gc_f, gc_r, amplicon_len, warnings, selected_reason,
-                                                tm_delta, rescue_tier, tm_profile, tm_calc_params)
-                            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                            INSERT INTO primers(
+                                run_id, gene_id, backbone_id,
+                                primer_name_f, primer_name_r,
+                                gene_bind_f, gene_bind_r, final_f, final_r,
+                                bind_start_f, bind_end_f, bind_start_r, bind_end_r,
+                                amplicon_seq, insert_seq, seq_type, remove_stop, construct_type,
+                                tm_f, tm_r, gc_f, gc_r, amplicon_len, warnings, selected_reason,
+                                tm_delta, rescue_tier, tm_profile, tm_calc_params
+                            )
+                            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                             """,
                             (
                                 run_id,
                                 g["id"],
+                                int(bb["id"]),
                                 out["primer_name_f"],
                                 out["primer_name_r"],
                                 out["gene_bind_f"],
@@ -399,6 +484,10 @@ def design_page(user, config):
                                 out.get("bind_start_r"),
                                 out.get("bind_end_r"),
                                 out.get("amplicon_seq", ""),
+                                out.get("insert_seq", ""),
+                                out.get("seq_type", ""),
+                                1 if bool(out.get("remove_stop")) else 0,
+                                out.get("construct_type", ""),
                                 out.get("tm_f"),
                                 out.get("tm_r"),
                                 out.get("gc_f"),
@@ -413,24 +502,29 @@ def design_page(user, config):
                             ),
                         )
                         conn.commit()
-                    except Exception as e:
+                    except Exception as exc:
                         failures.append(
                             {
                                 "backbone": _bb_label(bb),
                                 "gene": g["gene_name"],
-                                "seq_type": item_seq_type,
-                                "remove_stop": _remove_stop_label(item_seq_type, item_remove_stop),
-                                "reason": str(e),
+                                "seq_type": combo["seq_type"],
+                                "remove_stop": _remove_stop_label(combo["seq_type"], bool(combo["remove_stop"])),
+                                "reason": str(exc),
                             }
                         )
                     done += 1
                     prog.progress(done / total_steps)
 
-            st.session_state["last_results"] = all_results
-            st.session_state["last_failures"] = failures
-            st.success(f"Generated primers for mapping. Saved runs: {run_ids}")
-            if failures:
-                st.warning(f"{len(failures)} genes failed and were skipped.")
+                run_status = "success" if not failures else "fail"
+                conn.execute("UPDATE primer_runs SET status=? WHERE id=? AND user_id=?", (run_status, run_id, user["id"]))
+                conn.commit()
+
+                st.session_state["last_results"] = all_results
+                st.session_state["last_failures"] = failures
+                st.session_state["last_run_id"] = run_id
+                st.success(f"Generated primers. Run {run_id} status: {run_status}.")
+                if failures:
+                    st.warning(f"{len(failures)} combinations failed and were skipped.")
 
     if "last_results" in st.session_state and st.session_state["last_results"]:
         st.divider()
@@ -445,12 +539,14 @@ def design_page(user, config):
                 {
                     k: v
                     for k, v in r.items()
-                    if k in [
+                    if k
+                    in [
                         "backbone_label",
                         "gene_name",
                         "primer_name_f",
                         "primer_name_r",
                         "seq_type",
+                        "construct_type",
                         "remove_stop",
                         "amplicon_len",
                         "tm_f",
@@ -493,9 +589,7 @@ def design_page(user, config):
                 template_bytes = TEMPLATE_PATH.read_bytes()
                 template_label = "Built-in template"
             else:
-                template_bytes, template_label = get_effective_template_bytes(
-                    conn, int(user["id"]), int(selected_template_key)
-                )
+                template_bytes, template_label = get_effective_template_bytes(conn, int(user["id"]), int(selected_template_key))
             xbytes = export_from_template_bytes(
                 st.session_state["last_results"],
                 template_bytes=template_bytes,
@@ -508,8 +602,9 @@ def design_page(user, config):
                 key="design_download_excel",
             )
             st.caption(f"Export template: {template_label}")
-        except Exception as e:
-            st.error(f"Excel export blocked by validation: {e}")
+        except Exception as exc:
+            st.error(f"Excel export blocked by validation: {exc}")
+
         frag_txt = build_fragment_length_txt(all_result_rows)
         st.download_button(
             "Download Fragment Length TXT",
@@ -535,12 +630,18 @@ def design_page(user, config):
         else:
             st.info("No non-CDS amplicon sequences in this batch.")
 
+        try:
+            gb_name, gb_data, gb_mime = build_genbank_bundle(all_result_rows)
+            st.download_button("Download GenBank map", data=gb_data, file_name=gb_name, mime=gb_mime, key="design_download_genbank")
+        except Exception as exc:
+            st.warning(f"GenBank export unavailable: {exc}")
+
     failures = st.session_state.get("last_failures", [])
     if failures:
-        st.markdown("### Failed genes (this session)")
+        st.markdown("### Failed combinations (this session)")
         st.dataframe(failures, use_container_width=True)
-        failed_gene_list = "\n".join([f["gene"] for f in failures])
-        st.text_area("Failed gene names (copy for re-run)", value=failed_gene_list, height=120, key="design_failed_copy")
+        failed_gene_list = "\n".join([f"{f['backbone']}::{f['gene']}" for f in failures])
+        st.text_area("Failed items (copy for re-run)", value=failed_gene_list, height=120, key="design_failed_copy")
 
     conn.close()
 

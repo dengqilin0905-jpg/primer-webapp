@@ -51,7 +51,7 @@ tabs = st.tabs(["Profile", "Backbones", "Genes (Batch Import)", "Templates", "De
 with tabs[0]:
     profile_page(user)
 with tabs[1]:
-    backbones_page(user)
+    backbones_page(user, CFG)
 with tabs[2]:
     genes_page(user, CFG)
 with tabs[3]:

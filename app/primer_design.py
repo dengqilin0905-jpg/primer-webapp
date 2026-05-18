@@ -11,6 +11,7 @@ SNAPGENE_PRESET = {
     "dNTPs": 0.2,
     "primer_conc": 250.0,
 }
+STOP_CODONS = {"TAA", "TAG", "TGA"}
 
 
 def normalize_seq(s: str) -> str:
@@ -28,7 +29,7 @@ def trim_stop_codon(cds: str) -> tuple[str, bool]:
     if len(cds) < 3:
         return cds, False
     stop = cds[-3:]
-    if stop in {"TAA", "TAG", "TGA"}:
+    if stop in STOP_CODONS:
         return cds[:-3], True
     return cds, False
 
@@ -388,6 +389,54 @@ def _build_cds_attempts(tm_min: float, tm_max: float, max_len: int) -> list[dict
     return uniq
 
 
+def _frame_check_messages(
+    seq: str,
+    seq_type_norm: str,
+    construct_type: str,
+    remove_stop: bool,
+    restriction_site_f: str,
+    restriction_site_r: str,
+    junction_extra_bases_f: int,
+    junction_extra_bases_r: int,
+) -> list[str]:
+    msgs: list[str] = []
+    ct = (construct_type or "CDS_no_tag").strip()
+    ct_lower = ct.lower()
+    if seq_type_norm != "CDS" or ct_lower == "promoter_or_non_coding":
+        return msgs
+
+    if len(seq) % 3 == 0:
+        msgs.append("OK: CDS length is in-frame.")
+    else:
+        msgs.append("Warning: insert length is not a multiple of 3.")
+
+    codons = [seq[i : i + 3] for i in range(0, max(0, len(seq) - 2), 3)]
+    terminal_is_stop = bool(codons) and codons[-1] in STOP_CODONS
+    internal = [c for c in codons[:-1] if c in STOP_CODONS] if terminal_is_stop else [c for c in codons if c in STOP_CODONS]
+    if internal:
+        msgs.append("Warning: internal stop codon detected.")
+
+    if terminal_is_stop and not remove_stop:
+        msgs.append("Warning: terminal stop retained; C-terminal fusion may fail.")
+        if ct_lower == "c_terminal_tag":
+            msgs.append("Warning: terminal stop retained; C-terminal tag will not be translated.")
+
+    site_f = normalize_seq(restriction_site_f or "")
+    site_r = normalize_seq(restriction_site_r or "")
+    j5 = max(0, int(junction_extra_bases_f or 0))
+    j3 = max(0, int(junction_extra_bases_r or 0))
+    add5 = len(site_f) + j5
+    add3 = len(site_r) + j3
+
+    if add5 % 3 != 0:
+        msgs.append(f"Warning: 5' junction adds {add5} bp, causing +{add5 % 3} frameshift.")
+    if (len(seq) + add5 + add3) % 3 != 0:
+        msgs.append("Warning: junction + insert is not in-frame.")
+    elif add5 == 0 and add3 == 0 and len(seq) % 3 == 0:
+        msgs.append("OK: junction + insert remains in-frame.")
+    return msgs
+
+
 def design_primers_for_gene(
     gene_name: str,
     seq: str,
@@ -415,8 +464,15 @@ def design_primers_for_gene(
     tm_delta_mode: str = "soft",
     tm_profile: str = "custom",
     cds_recovery_enable: bool = True,
+    enable_frame_check: bool = False,
+    construct_type: str = "CDS_no_tag",
+    restriction_site_f: str = "",
+    restriction_site_r: str = "",
+    junction_extra_bases_f: int = 0,
+    junction_extra_bases_r: int = 0,
 ):
     seq = normalize_seq(seq)
+    original_seq = seq
     warnings: list[str] = []
     failure_trace: list[dict[str, Any]] = []
     seq_type_norm = (seq_type or "CDS").strip().upper()
@@ -642,6 +698,20 @@ def design_primers_for_gene(
     if tm_delta > float(tm_pair_delta_max):
         warnings.append(f"Tm delta warning ({tm_delta:.2f})")
 
+    frame_check_warnings: list[str] = []
+    if enable_frame_check:
+        frame_check_warnings = _frame_check_messages(
+            seq=seq,
+            seq_type_norm=seq_type_norm,
+            construct_type=construct_type,
+            remove_stop=remove_stop,
+            restriction_site_f=restriction_site_f,
+            restriction_site_r=restriction_site_r,
+            junction_extra_bases_f=junction_extra_bases_f,
+            junction_extra_bases_r=junction_extra_bases_r,
+        )
+        warnings.extend(frame_check_warnings)
+
     final_f = homo_f + gene_bind_f
     final_r = homo_r + gene_bind_r
 
@@ -662,8 +732,13 @@ def design_primers_for_gene(
         "gc_f": gc_f,
         "gc_r": gc_r,
         "amplicon_len": amplicon_len,
+        "insert_seq": seq,
+        "original_seq": original_seq,
         "warnings": "; ".join(warnings),
+        "frame_check_warnings": "; ".join(frame_check_warnings),
         "seq_type": seq_type_norm,
+        "construct_type": construct_type,
+        "remove_stop": bool(remove_stop),
         "selected_reason": selected_reason,
         "rescue_tier": rescue_tier,
         "tm_profile": profile_norm,

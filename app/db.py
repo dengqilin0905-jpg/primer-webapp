@@ -113,6 +113,7 @@ def _migrate_backbones_unique(conn: sqlite3.Connection):
     fk_before = int(conn.execute("PRAGMA foreign_keys").fetchone()[0])
     conn.execute("PRAGMA foreign_keys=OFF")
     cur = conn.cursor()
+    old_cols = {r[1] for r in cur.execute("PRAGMA table_info(backbones)").fetchall()}
     cur.execute("BEGIN")
     cur.execute(
         """
@@ -123,6 +124,13 @@ def _migrate_backbones_unique(conn: sqlite3.Connection):
             enzyme_sites TEXT NOT NULL DEFAULT '',
             homo_f TEXT NOT NULL,
             homo_r TEXT NOT NULL,
+            vector_sequence TEXT NOT NULL DEFAULT '',
+            insertion_mode TEXT NOT NULL DEFAULT 'linear_join',
+            restriction_site_f TEXT NOT NULL DEFAULT '',
+            restriction_site_r TEXT NOT NULL DEFAULT '',
+            junction_extra_bases_f INTEGER NOT NULL DEFAULT 0,
+            junction_extra_bases_r INTEGER NOT NULL DEFAULT 0,
+            vector_map_note TEXT NOT NULL DEFAULT '',
             defaults_json TEXT,
             created_at TEXT NOT NULL,
             UNIQUE(user_id, name, enzyme_sites),
@@ -130,10 +138,31 @@ def _migrate_backbones_unique(conn: sqlite3.Connection):
         );
         """
     )
+    vector_sequence_expr = "COALESCE(vector_sequence, '')" if "vector_sequence" in old_cols else "''"
+    insertion_mode_expr = "COALESCE(insertion_mode, 'linear_join')" if "insertion_mode" in old_cols else "'linear_join'"
+    rsf_expr = "COALESCE(restriction_site_f, '')" if "restriction_site_f" in old_cols else "''"
+    rsr_expr = "COALESCE(restriction_site_r, '')" if "restriction_site_r" in old_cols else "''"
+    jef_expr = "COALESCE(junction_extra_bases_f, 0)" if "junction_extra_bases_f" in old_cols else "0"
+    jer_expr = "COALESCE(junction_extra_bases_r, 0)" if "junction_extra_bases_r" in old_cols else "0"
+    note_expr = "COALESCE(vector_map_note, '')" if "vector_map_note" in old_cols else "''"
     cur.execute(
-        """
-        INSERT INTO backbones_new(id, user_id, name, enzyme_sites, homo_f, homo_r, defaults_json, created_at)
-        SELECT id, user_id, name, COALESCE(enzyme_sites, ''), homo_f, homo_r, defaults_json, created_at
+        f"""
+        INSERT INTO backbones_new(
+            id, user_id, name, enzyme_sites, homo_f, homo_r,
+            vector_sequence, insertion_mode, restriction_site_f, restriction_site_r,
+            junction_extra_bases_f, junction_extra_bases_r, vector_map_note,
+            defaults_json, created_at
+        )
+        SELECT
+            id, user_id, name, COALESCE(enzyme_sites, ''), homo_f, homo_r,
+            {vector_sequence_expr},
+            {insertion_mode_expr},
+            {rsf_expr},
+            {rsr_expr},
+            {jef_expr},
+            {jer_expr},
+            {note_expr},
+            defaults_json, created_at
         FROM backbones;
         """
     )
@@ -188,6 +217,13 @@ def init_db(conn: sqlite3.Connection):
             enzyme_sites TEXT NOT NULL DEFAULT '',
             homo_f TEXT NOT NULL,
             homo_r TEXT NOT NULL,
+            vector_sequence TEXT NOT NULL DEFAULT '',
+            insertion_mode TEXT NOT NULL DEFAULT 'linear_join',
+            restriction_site_f TEXT NOT NULL DEFAULT '',
+            restriction_site_r TEXT NOT NULL DEFAULT '',
+            junction_extra_bases_f INTEGER NOT NULL DEFAULT 0,
+            junction_extra_bases_r INTEGER NOT NULL DEFAULT 0,
+            vector_map_note TEXT NOT NULL DEFAULT '',
             defaults_json TEXT,
             created_at TEXT NOT NULL,
             UNIQUE(user_id, name, enzyme_sites),
@@ -219,6 +255,7 @@ def init_db(conn: sqlite3.Connection):
             params_json TEXT NOT NULL,
             created_at TEXT NOT NULL,
             note TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
             FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY(backbone_id) REFERENCES backbones(id) ON DELETE CASCADE
         );
@@ -231,6 +268,7 @@ def init_db(conn: sqlite3.Connection):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id INTEGER NOT NULL,
             gene_id INTEGER NOT NULL,
+            backbone_id INTEGER,
             primer_name_f TEXT NOT NULL,
             primer_name_r TEXT NOT NULL,
             gene_bind_f TEXT NOT NULL,
@@ -242,6 +280,10 @@ def init_db(conn: sqlite3.Connection):
             bind_start_r INTEGER,
             bind_end_r INTEGER,
             amplicon_seq TEXT,
+            insert_seq TEXT,
+            seq_type TEXT,
+            remove_stop INTEGER,
+            construct_type TEXT,
             tm_f REAL,
             tm_r REAL,
             gc_f REAL,
@@ -254,7 +296,8 @@ def init_db(conn: sqlite3.Connection):
             tm_profile TEXT,
             tm_calc_params TEXT,
             FOREIGN KEY(run_id) REFERENCES primer_runs(id) ON DELETE CASCADE,
-            FOREIGN KEY(gene_id) REFERENCES genes(id) ON DELETE CASCADE
+            FOREIGN KEY(gene_id) REFERENCES genes(id) ON DELETE CASCADE,
+            FOREIGN KEY(backbone_id) REFERENCES backbones(id) ON DELETE CASCADE
         );
         """
     )
@@ -282,6 +325,49 @@ def init_db(conn: sqlite3.Connection):
         cur.execute("ALTER TABLE primers ADD COLUMN bind_end_r INTEGER")
     if "amplicon_seq" not in primer_cols:
         cur.execute("ALTER TABLE primers ADD COLUMN amplicon_seq TEXT")
+    if "backbone_id" not in primer_cols:
+        cur.execute("ALTER TABLE primers ADD COLUMN backbone_id INTEGER")
+    if "insert_seq" not in primer_cols:
+        cur.execute("ALTER TABLE primers ADD COLUMN insert_seq TEXT")
+    if "seq_type" not in primer_cols:
+        cur.execute("ALTER TABLE primers ADD COLUMN seq_type TEXT")
+    if "remove_stop" not in primer_cols:
+        cur.execute("ALTER TABLE primers ADD COLUMN remove_stop INTEGER")
+    if "construct_type" not in primer_cols:
+        cur.execute("ALTER TABLE primers ADD COLUMN construct_type TEXT")
+
+    backbone_cols = {r[1] for r in cur.execute("PRAGMA table_info(backbones)").fetchall()}
+    if "vector_sequence" not in backbone_cols:
+        cur.execute("ALTER TABLE backbones ADD COLUMN vector_sequence TEXT NOT NULL DEFAULT ''")
+    if "insertion_mode" not in backbone_cols:
+        cur.execute("ALTER TABLE backbones ADD COLUMN insertion_mode TEXT NOT NULL DEFAULT 'linear_join'")
+    if "restriction_site_f" not in backbone_cols:
+        cur.execute("ALTER TABLE backbones ADD COLUMN restriction_site_f TEXT NOT NULL DEFAULT ''")
+    if "restriction_site_r" not in backbone_cols:
+        cur.execute("ALTER TABLE backbones ADD COLUMN restriction_site_r TEXT NOT NULL DEFAULT ''")
+    if "junction_extra_bases_f" not in backbone_cols:
+        cur.execute("ALTER TABLE backbones ADD COLUMN junction_extra_bases_f INTEGER NOT NULL DEFAULT 0")
+    if "junction_extra_bases_r" not in backbone_cols:
+        cur.execute("ALTER TABLE backbones ADD COLUMN junction_extra_bases_r INTEGER NOT NULL DEFAULT 0")
+    if "vector_map_note" not in backbone_cols:
+        cur.execute("ALTER TABLE backbones ADD COLUMN vector_map_note TEXT NOT NULL DEFAULT ''")
+
+    run_cols = {r[1] for r in cur.execute("PRAGMA table_info(primer_runs)").fetchall()}
+    if "status" not in run_cols:
+        cur.execute("ALTER TABLE primer_runs ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'")
+
+    # Backfill primer.backbone_id for legacy rows.
+    cur.execute(
+        """
+        UPDATE primers
+        SET backbone_id = (
+            SELECT r.backbone_id
+            FROM primer_runs r
+            WHERE r.id = primers.run_id
+        )
+        WHERE backbone_id IS NULL
+        """
+    )
 
     cur.execute(
         """

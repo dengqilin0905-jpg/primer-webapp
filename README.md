@@ -1,184 +1,125 @@
-# Primer WebApp
+# Primer Designer (Streamlit + SQLite)
 
-Streamlit-based primer design tool with user login, history tracking, multi-format sequence import, and Excel/TXT/FASTA export.
+Primer Designer is a local/internal primer design tool for cloning workflows.
+It keeps per-user private data, supports multi-format sequence import, batch design, Sangon Excel export, and SnapGene-compatible GenBank map export.
 
-This repository now supports two operation modes:
+## Core stack
 
-- `local` mode: personal long-term local use.
-- `server` mode: small-group cloud trial with stronger resource and isolation controls.
+- Python
+- Streamlit
+- SQLite
+- Entry: `app/app.py`
 
-## Core Stack
+## Main features
 
-- Language: Python
-- Framework: Streamlit
-- Database: SQLite
-- Main entry: `app/app.py`
-
-## Features
-
-- User registration/login (password hash: PBKDF2-HMAC-SHA256 + random salt)
-- Backbone management (supports same backbone name with different enzyme sites)
-- Gene import: FASTA/TXT/GenBank/SnapGene `.dna` (with content sniffing)
-- Mapping-based batch primer design (`CDS` / `Promoter` / `Other`)
-- Per-mapping `remove_stop` for CDS
-- History with re-export
-- Export:
-  - Excel order sheet
+- User register/login (password hashed with PBKDF2 + salt)
+- Per-user backbone library:
+  - `backbone name`, `HOMO_F`, `HOMO_R`, enzyme label
+  - optional vector map fields:
+    - `vector_sequence`
+    - `insertion_mode`
+    - restriction sites and junction extra bases
+    - map note
+- Gene import:
+  - FASTA/TXT/GenBank/SnapGene `.dna`
+- Design batch modes:
+  - `mapping` mode (existing fine-grained control)
+  - `cartesian` mode (Gene × Backbone combinations)
+- Optional frame check:
+  - in-frame / stop codon / junction shift warnings
+- Exports:
+  - Sangon Excel (`sangon_template.xlsx`, format preserved)
   - Fragment TXT (full/simple)
-  - non-CDS amplicon FASTA
-- User template system:
-  - upload multiple Excel templates
-  - set default template
-  - delete/download template
-  - choose template when exporting (design + history)
+  - non-CDS FASTA
+  - SnapGene-compatible GenBank (`.gbk`) or ZIP bundle for multi-combo runs
+- History:
+  - keeps each run with auto status (`pending/success/fail`)
+  - supports re-export
 
-## Repository Layout
+## Local run
+
+### 1) Create venv
+
+```bash
+python -m venv .venv
+```
+
+Windows:
+
+```bash
+.venv\Scripts\activate
+```
+
+Linux/macOS:
+
+```bash
+source .venv/bin/activate
+```
+
+### 2) Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+`snapgene-reader==0.1.23` is required for `.dna` parsing.
+
+### 3) Start Streamlit
+
+```bash
+streamlit run app/app.py --server.address 127.0.0.1 --server.port 8501
+```
+
+Open:
+
+- <http://127.0.0.1:8501>
+
+## `.dna` import notes
+
+- Upload `.dna` directly in Genes page (or in Backbones vector upload).
+- If `.dna` parse fails, the app shows clear per-file errors and continues processing other files.
+- Binary files mislabeled as `.fa/.txt` are content-checked and routed safely.
+
+## Design workflow
+
+1. Add backbones (with HOMO arms, optional vector sequence and restriction settings).
+2. Import genes.
+3. Go to Design page:
+   - choose `mapping` or `cartesian` batch mode
+   - set Tm/length parameters
+   - optional frame-check options
+4. Generate primers.
+5. Export:
+   - Sangon Excel
+   - GenBank map (`.gbk` / ZIP)
+
+## Sangon Excel export guarantees
+
+- Uses `app/sangon_template.xlsx` as template baseline.
+- Keeps template format, formula, data validation, and headers.
+- Auto-extends rows when primer count exceeds base template range.
+- Writes profile fields into template header.
+
+## Repository layout
 
 ```text
 app/
   app.py
   db.py
-  primer_design.py
   design_ui.py
   history_ui.py
-  templates_ui.py
-  ...
-scripts/
-  run_local.sh
-  run_server.sh
+  backbones_ui.py
+  primer_design.py
+  excel_export.py
+  genbank_export.py
 deploy/
-  systemd/primer-webapp.service
-  nginx/primer-webapp.conf
-examples/
-docs/
+scripts/
 ```
 
-## Local Mode (GitHub download, run on your own machine)
-
-### 1) Create venv and install
+## Quick checks
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+python scripts/check_indent.py
+python -m py_compile app/*.py
 ```
 
-### 2) Start app
-
-```bash
-export APP_MODE=local
-export DB_PATH=./data/app.db
-streamlit run app/app.py --server.address 127.0.0.1 --server.port 8501
-```
-
-Open `http://127.0.0.1:8501`.
-
-## Server Mode (Alibaba Cloud Ubuntu 22.04)
-
-### 1) Server requirements
-
-- Ubuntu 22.04
-- Python 3.10+
-- nginx + systemd
-
-### 2) Deploy path example
-
-```bash
-sudo mkdir -p /opt/primer-webapp
-sudo chown -R $USER:$USER /opt/primer-webapp
-cd /opt/primer-webapp
-git clone <your-repo-url> .
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-chmod +x scripts/run_local.sh scripts/run_server.sh
-```
-
-### 3) Environment (server mode)
-
-```bash
-export APP_MODE=server
-export DB_PATH=/opt/primer-webapp/data/app.db
-export APP_HOST=127.0.0.1
-export APP_PORT=8501
-export MAX_TEMPLATE_SIZE_MB=2
-export MAX_TEMPLATES_PER_USER=5
-export MAX_UPLOAD_SIZE_MB=20
-export TEMP_FILE_RETENTION_HOURS=24
-export TEMP_DIR=/tmp/primer-webapp
-# optional shared gate
-export APP_PASSWORD=<optional-site-password>
-```
-
-### 4) Start with systemd
-
-Use `deploy/systemd/primer-webapp.service` and set:
-
-- `User`
-- `WorkingDirectory`
-- `EnvironmentFile` path
-
-Then:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable primer-webapp
-sudo systemctl start primer-webapp
-sudo systemctl status primer-webapp
-```
-
-### 5) nginx reverse proxy
-
-Use `deploy/nginx/primer-webapp.conf`, then:
-
-```bash
-sudo ln -s /etc/nginx/sites-available/primer-webapp.conf /etc/nginx/sites-enabled/primer-webapp.conf
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-## Security and Isolation Notes
-
-- Passwords are not stored in plaintext.
-- DB operations for history/templates/genes/backbones are user-scoped.
-- Server upload checks:
-  - extension allowlist
-  - file size limit (`MAX_UPLOAD_SIZE_MB`, `MAX_TEMPLATE_SIZE_MB`)
-- Server template quota per user: `MAX_TEMPLATES_PER_USER` (default 5)
-- Template data is bound to `user_id`.
-- Temporary files are isolated in `TEMP_DIR` and cleaned by retention policy.
-- Keep primer app and private JBrowse in separate directories and separate nginx site configs.
-
-## Config Variables
-
-- `APP_MODE` = `local` or `server`
-- `DB_PATH`
-- `APP_HOST`
-- `APP_PORT`
-- `MAX_TEMPLATE_SIZE_MB`
-- `MAX_TEMPLATES_PER_USER`
-- `MAX_UPLOAD_SIZE_MB`
-- `TEMP_FILE_RETENTION_HOURS`
-- `TEMP_DIR`
-- `APP_PASSWORD` (optional)
-
-## Input / Output
-
-- Inputs:
-  - gene files (`.fasta/.fa/.fna/.txt/.gb/.gbk/.genbank/.dna`)
-  - backbone settings
-  - design parameters
-- Outputs:
-  - Excel order sheet (`.xlsx`, selected template)
-  - fragment record TXT
-  - non-CDS amplicon FASTA
-
-## Release Suggestion
-
-Recommend publishing `v1.0.0` with:
-
-1. source code
-2. local setup guide
-3. server deployment guide
-4. examples
-5. changelog

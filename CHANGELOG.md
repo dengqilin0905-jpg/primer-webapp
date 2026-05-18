@@ -1,5 +1,42 @@
 # Changelog
 
+## v1.1.0 - 2026-05-18
+
+### Added
+
+- Design dual batch modes:
+  - `mapping` (existing behavior)
+  - `cartesian` (Gene × Backbone full combinations)
+- Run status tracking in `primer_runs`: `pending/success/fail`.
+- Backbone map fields:
+  - `vector_sequence`
+  - `insertion_mode`
+  - `restriction_site_f/r`
+  - `junction_extra_bases_f/r`
+  - `vector_map_note`
+- GenBank map export (`.gbk`) and multi-record ZIP export:
+  - available in Design result and History re-export
+  - SnapGene-compatible GenBank output with required features
+- Optional frame-check settings in Design:
+  - `enable_frame_check`
+  - `construct_type`
+  - warning integration into result/history/excel remarks
+- Indentation checker script: `scripts/check_indent.py`.
+- New docs: `DEPLOYMENT.md`.
+
+### Changed
+
+- Primer row schema extended to store per-result backbone/context data for mixed-backbone runs.
+- Design run execution now creates one run per batch and auto-updates run status.
+- History view now reads per-primer backbone info and supports GenBank map re-export.
+- README rewritten with local usage, `.dna` import, batch design, and export guidance.
+
+### Fixed
+
+- Robust Tm formatting in History for `None/NaN` values.
+- `.dna` parser path remains compatible with `snapgene-reader==0.1.23` and graceful file-level failure handling.
+- User data isolation maintained in updated queries and exports.
+
 ## v1.0.0 - 2026-05-09
 
 ### Added
