@@ -1,0 +1,71 @@
+name: Deploy Primer WebApp
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: primer-webapp-deploy-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_DIR: /tmp/primer-webapp-release
+      RELEASE_ARCHIVE: release.tar.gz
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package release archive
+        run: |
+          mkdir -p _release
+          tar -czf "_release/${RELEASE_ARCHIVE}" \
+            --exclude=".git" \
+            --exclude=".github" \
+            --exclude=".venv" \
+            --exclude="__pycache__" \
+            --exclude="*/__pycache__" \
+            --exclude="*.pyc" \
+            --exclude="*.pyo" \
+            --exclude="*.db" \
+            --exclude=".env" \
+            --exclude=".env.*" \
+            --exclude=".streamlit/secrets.toml" \
+            --exclude="data" \
+            --exclude="app/app.db" \
+            --exclude="app/_deps" \
+            --exclude="python" \
+            --exclude="tmp" \
+            --exclude=".pytest_cache" \
+            --exclude=".mypy_cache" \
+            --exclude=".ruff_cache" \
+            .
+
+      - name: Prepare SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Create remote release dir
+        run: |
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "mkdir -p '${RELEASE_DIR}'"
+
+      - name: Upload release archive and deploy script
+        run: |
+          scp -P "${{ secrets.SSH_PORT }}" "_release/${RELEASE_ARCHIVE}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${RELEASE_DIR}/${RELEASE_ARCHIVE}"
+          scp -P "${{ secrets.SSH_PORT }}" "scripts/remote_deploy.sh" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${RELEASE_DIR}/remote_deploy.sh"
+
+      - name: Run remote deploy
+        run: |
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "chmod +x '${RELEASE_DIR}/remote_deploy.sh' && '${RELEASE_DIR}/remote_deploy.sh' '${RELEASE_DIR}/${RELEASE_ARCHIVE}'"

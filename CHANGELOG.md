@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.1.1 - 2026-05-19
+
+### Added
+
+- GitHub Actions auto deploy workflow: `.github/workflows/deploy.yml`
+  - Trigger on `push` to `main`
+  - Uses SSH Secrets: `SSH_HOST`, `SSH_USER`, `SSH_PORT`, `SSH_PRIVATE_KEY`
+  - Packages code on runner and deploys via SSH upload + remote script execution
+- Remote deploy script: `scripts/remote_deploy.sh`
+  - Stops `primer-webapp`
+  - Backs up `/opt/primer-webapp`
+  - Preserves/restores `.env.server` and `data/`
+  - Rebuilds `.venv`, installs dependencies, restarts service
+
+### Changed
+
+- `DEPLOYMENT.md` expanded with GitHub Actions secrets setup and auto-deploy usage.
+
 ## v1.1.0 - 2026-05-18
 
 ### Added
