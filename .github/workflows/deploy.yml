@@ -22,8 +22,8 @@ jobs:
 
       - name: Package release archive
         run: |
-          mkdir -p _release
-          tar -czf "_release/${RELEASE_ARCHIVE}" \
+          mkdir -p "$RUNNER_TEMP/primer-release"
+          tar -czf "$RUNNER_TEMP/primer-release/${RELEASE_ARCHIVE}" \
             --exclude=".git" \
             --exclude=".github" \
             --exclude=".venv" \
@@ -60,7 +60,7 @@ jobs:
 
       - name: Upload release archive and deploy script
         run: |
-          scp -P "${{ secrets.SSH_PORT }}" "_release/${RELEASE_ARCHIVE}" \
+          scp -P "${{ secrets.SSH_PORT }}" "$RUNNER_TEMP/primer-release/${RELEASE_ARCHIVE}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${RELEASE_DIR}/${RELEASE_ARCHIVE}"
           scp -P "${{ secrets.SSH_PORT }}" "scripts/remote_deploy.sh" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${RELEASE_DIR}/remote_deploy.sh"
