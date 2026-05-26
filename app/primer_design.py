@@ -151,6 +151,7 @@ def _iter_forward_candidates_at_start(
     tm_priority_weight: float,
     forbid_homopolymer: bool,
     tm_params: dict[str, float],
+    relax_tm_gc: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     n = len(seq)
     stats = _empty_stats()
@@ -162,13 +163,17 @@ def _iter_forward_candidates_at_start(
         bind = seq[start:end]
         stats["total"] += 1
         t = tm_nn(bind, **tm_params)
-        if not _in_range(t, tm_min, tm_max):
+        tm_ok = _in_range(t, tm_min, tm_max)
+        if not tm_ok:
             stats["tm_fail"] += 1
-            continue
+            if not relax_tm_gc:
+                continue
         gc = float(gc_fraction(bind) * 100.0)
-        if not _in_range(gc, gc_min, gc_max):
+        gc_ok = _in_range(gc, gc_min, gc_max)
+        if not gc_ok:
             stats["gc_fail"] += 1
-            continue
+            if not relax_tm_gc:
+                continue
         if forbid_homopolymer and _contains_forbidden_homopolymer(bind):
             stats["hp_fail"] += 1
             continue
@@ -197,6 +202,8 @@ def _iter_forward_candidates_at_start(
                 "gc_dev": float(gc_dev),
                 "struct_pen": float(struct_pen),
                 "len_dev": float(len_dev),
+                "tm_ok": bool(tm_ok),
+                "gc_ok": bool(gc_ok),
             }
         )
     return out, stats
@@ -217,6 +224,7 @@ def _iter_reverse_candidates_at_end(
     tm_priority_weight: float,
     forbid_homopolymer: bool,
     tm_params: dict[str, float],
+    relax_tm_gc: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     stats = _empty_stats()
     out: list[dict[str, Any]] = []
@@ -228,13 +236,17 @@ def _iter_reverse_candidates_at_end(
         rc = revcomp(bind)
         stats["total"] += 1
         t = tm_nn(rc, **tm_params)
-        if not _in_range(t, tm_min, tm_max):
+        tm_ok = _in_range(t, tm_min, tm_max)
+        if not tm_ok:
             stats["tm_fail"] += 1
-            continue
+            if not relax_tm_gc:
+                continue
         gc = float(gc_fraction(rc) * 100.0)
-        if not _in_range(gc, gc_min, gc_max):
+        gc_ok = _in_range(gc, gc_min, gc_max)
+        if not gc_ok:
             stats["gc_fail"] += 1
-            continue
+            if not relax_tm_gc:
+                continue
         if forbid_homopolymer and _contains_forbidden_homopolymer(rc):
             stats["hp_fail"] += 1
             continue
@@ -263,6 +275,8 @@ def _iter_reverse_candidates_at_end(
                 "gc_dev": float(gc_dev),
                 "struct_pen": float(struct_pen),
                 "len_dev": float(len_dev),
+                "tm_ok": bool(tm_ok),
+                "gc_ok": bool(gc_ok),
             }
         )
     return out, stats
@@ -272,6 +286,57 @@ def _build_failure_note(prefix: str, stats: dict[str, int], tm_min: float, tm_ma
     return (
         f"{prefix} no candidate passing Tm[{tm_min:.1f},{tm_max:.1f}] and GC[{gc_min:.1f},{gc_max:.1f}]"
         f" (checked={stats['total']}, tm_fail={stats['tm_fail']}, gc_fail={stats['gc_fail']}, hp_fail={stats['hp_fail']})"
+    )
+
+
+def _build_actionable_design_error(
+    failure_trace: list[dict[str, Any]],
+    tm_min: float,
+    tm_max: float,
+    target_tm: float,
+    min_len: int,
+    max_len: int,
+    gc_min: float,
+    gc_max: float,
+    remove_stop: bool,
+) -> str:
+    trace_bits = []
+    for x in failure_trace:
+        trace_bits.append(
+            f"{x['tier']}[Tm {x['tm_min']:.1f}-{x['tm_max']:.1f}, max_len={x['max_len']}]"
+            f" Fpass={x['forward']['pass']} Rpass={x['reverse']['pass']}"
+        )
+    stop_hint = "当前选择去除 stop codon" if remove_stop else "当前选择保留 stop codon"
+    return (
+        "当前序列无法在现有参数下找到合适引物。"
+        f"已尝试：{'; '.join(trace_bits) if trace_bits else '无有效候选'}。"
+        f"当前参数为 Tm min={tm_min:.1f}C、Tm max={tm_max:.1f}C、Target Tm={target_tm:.1f}C、"
+        f"primer length={min_len}-{max_len} bp、GC={gc_min:.1f}-{gc_max:.1f}%、{stop_hint}。"
+        "请尝试：1) 将 Tm max 提高 2-5C；2) 将 Target Tm 提高到更接近候选序列；"
+        "3) 将 max primer length 从当前值提高到 35 或 36；4) 若序列 5' 端 GC 很高，将 GC max 提高到 70-75%；"
+        "5) 检查同源臂长度是否过长或方向是否填反；6) 对 CDS 确认是否需要去除 stop codon。"
+    )
+
+
+def _format_rescue_warning(
+    fw: dict[str, Any],
+    rv: dict[str, Any],
+    tm_min: float,
+    tm_max: float,
+    gc_min: float,
+    gc_max: float,
+    max_len: int,
+) -> str:
+    issues = []
+    for label, cand in [("F", fw), ("R", rv)]:
+        if not cand.get("tm_ok", True):
+            issues.append(f"{label} Tm {float(cand['tm']):.2f}C outside {tm_min:.1f}-{tm_max:.1f}C")
+        if not cand.get("gc_ok", True):
+            issues.append(f"{label} GC {float(cand['gc']):.1f}% outside {gc_min:.1f}-{gc_max:.1f}%")
+    detail = "; ".join(issues) if issues else "closest candidates selected"
+    return (
+        "CDS rescue applied: strict filters failed, selected closest end-anchored primers with warning. "
+        f"{detail}. If this is not acceptable, raise Tm max by 2-5C, raise GC max, or set max primer length up to {max(35, max_len)}."
     )
 
 
@@ -656,19 +721,81 @@ def design_primers_for_gene(
                 }
             )
 
+        if selected_pair is None and seq_type_norm == "CDS" and cds_recovery_enable:
+            rescue_max_len = max(36, int(max_len))
+            fws, fw_stats = _iter_forward_candidates_at_start(
+                seq=seq,
+                start=0,
+                min_len=min_len,
+                max_len=rescue_max_len,
+                tm_min=tm_min,
+                tm_max=tm_max,
+                target_tm=target_tm,
+                gc_min=gc_min,
+                gc_max=gc_max,
+                pref_len_lo=pref_lo,
+                pref_len_hi=pref_hi,
+                tm_priority_weight=tm_priority_weight,
+                forbid_homopolymer=hp_filter_on,
+                tm_params=tm_params,
+                relax_tm_gc=True,
+            )
+            rvs, rv_stats = _iter_reverse_candidates_at_end(
+                seq=seq,
+                end=n,
+                min_len=min_len,
+                max_len=rescue_max_len,
+                tm_min=tm_min,
+                tm_max=tm_max,
+                target_tm=target_tm,
+                gc_min=gc_min,
+                gc_max=gc_max,
+                pref_len_lo=pref_lo,
+                pref_len_hi=pref_hi,
+                tm_priority_weight=tm_priority_weight,
+                forbid_homopolymer=hp_filter_on,
+                tm_params=tm_params,
+                relax_tm_gc=True,
+            )
+            selected_pair = _select_pair(
+                forwards=fws,
+                reverses=rvs,
+                tm_pair_delta_max=float(tm_pair_delta_max),
+                tm_delta_mode="soft",
+                prefer_longest=False,
+            )
+            if selected_pair is not None:
+                rescue_tier = "tier4_relaxed_warning"
+                selected_reason = "best_available_with_parameter_warning"
+                failure_trace.append(
+                    {
+                        "tier": rescue_tier,
+                        "tm_min": float(tm_min),
+                        "tm_max": float(tm_max),
+                        "max_len": int(rescue_max_len),
+                        "forward": dict(fw_stats),
+                        "reverse": dict(rv_stats),
+                        "reason": "Strict filters failed; closest candidates were selected with warnings.",
+                    }
+                )
+
         if selected_pair is None:
             raise ValueError(
-                "No valid primer pair found under constraints; "
-                + "; ".join(
-                    [
-                        f"{x['tier']}[Tm {x['tm_min']:.1f}-{x['tm_max']:.1f}, max_len={x['max_len']}]"
-                        f" Fpass={x['forward']['pass']} Rpass={x['reverse']['pass']}"
-                        for x in failure_trace
-                    ]
+                _build_actionable_design_error(
+                    failure_trace=failure_trace,
+                    tm_min=float(tm_min),
+                    tm_max=float(tm_max),
+                    target_tm=float(target_tm),
+                    min_len=int(min_len),
+                    max_len=int(max_len),
+                    gc_min=float(gc_min),
+                    gc_max=float(gc_max),
+                    remove_stop=bool(remove_stop),
                 )
             )
 
-        selected_reason = "best_tm_with_noncds_filter" if hp_filter_on else "best_tm"
+        if rescue_tier != "tier4_relaxed_warning":
+            selected_reason = "best_tm_with_noncds_filter" if hp_filter_on else "best_tm"
 
     fw = selected_pair["fw"]
     rv = selected_pair["rv"]
@@ -692,7 +819,20 @@ def design_primers_for_gene(
         selected_reason = f"{selected_reason}|tm_delta_relaxed"
     if seq_type_norm == "PROMOTER":
         warnings.append(f"Promoter mode: selected longest amplicon {amplicon_len} bp")
-    if rescue_tier != "tier0":
+    if rescue_tier == "tier4_relaxed_warning":
+        warnings.append(
+            _format_rescue_warning(
+                fw=fw,
+                rv=rv,
+                tm_min=float(tm_min),
+                tm_max=float(tm_max),
+                gc_min=float(gc_min),
+                gc_max=float(gc_max),
+                max_len=int(max_len),
+            )
+        )
+        selected_reason = f"{selected_reason}|{rescue_tier}"
+    elif rescue_tier != "tier0":
         warnings.append(f"CDS rescue applied: {rescue_tier} (Tm window {chosen_tm_min:.1f}-{chosen_tm_max:.1f})")
         selected_reason = f"{selected_reason}|{rescue_tier}"
     if tm_delta > float(tm_pair_delta_max):

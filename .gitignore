@@ -34,6 +34,7 @@ temp/
 uploads/
 exports/
 output/
+.codex-qa/
 
 # Server temp files
 /tmp/primer-webapp/

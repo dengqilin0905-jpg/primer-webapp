@@ -170,7 +170,8 @@ def _export_with_workbook(wb, primer_rows, purification: str = "HAP", nmoles: in
     needed_max_row = START_ROW + len(flat) - 1 if flat else START_ROW
     _ensure_rows(ws, needed_max_row)
 
-    for row in range(START_ROW, needed_max_row + 1):
+    clear_max_row = max(BASE_TEMPLATE_MAX_ROW, needed_max_row, ws.max_row)
+    for row in range(START_ROW, clear_max_row + 1):
         ws[f"A{row}"].value = None
         ws[f"B{row}"].value = None
         ws[f"C{row}"].value = None

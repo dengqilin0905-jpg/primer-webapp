@@ -5,10 +5,20 @@ import streamlit as st
 
 from db import can_delete_backbone, get_conn
 from file_safety import validate_upload
-from primer_design import normalize_seq
+from primer_design import normalize_seq, revcomp
 from seq_io import parse_uploaded_file
 
 ALLOWED_VECTOR_EXTS = {".fasta", ".fa", ".fna", ".txt", ".gb", ".gbk", ".genbank", ".dna"}
+ENZYME_SEQUENCES = {
+    "BamHI": "GGATCC",
+    "EcoRI": "GAATTC",
+    "HindIII": "AAGCTT",
+    "XbaI": "TCTAGA",
+    "SpeI": "ACTAGT",
+    "KpnI": "GGTACC",
+    "SalI": "GTCGAC",
+    "SmaI": "CCCGGG",
+}
 
 
 def _snapshot(
@@ -57,6 +67,42 @@ def _load_vector_from_upload(uploaded_file, max_upload_size_mb: int) -> tuple[st
     return seq, "Vector sequence loaded from uploaded file."
 
 
+def _find_site_positions(seq: str, site: str) -> list[int]:
+    seq = normalize_seq(seq)
+    site = normalize_seq(site)
+    if not seq or not site:
+        return []
+    return [i for i in range(0, len(seq) - len(site) + 1) if seq.startswith(site, i)]
+
+
+def _auto_homology_from_sites(vector_sequence: str, site_f: str, site_r: str, arm_len: int) -> tuple[str, str, str]:
+    seq = normalize_seq(vector_sequence)
+    sf = normalize_seq(site_f)
+    sr = normalize_seq(site_r)
+    arm_len = max(1, int(arm_len or 0))
+    if not seq:
+        raise ValueError("请先上传或粘贴骨架序列，再自动生成同源臂。")
+    f_positions = _find_site_positions(seq, sf)
+    r_positions = _find_site_positions(seq, sr)
+    if len(f_positions) != 1 or len(r_positions) != 1:
+        raise ValueError(
+            "无法唯一定位酶切位点。"
+            f"Forward site 匹配 {len(f_positions)} 次，Reverse site 匹配 {len(r_positions)} 次。"
+            "请确认酶切位点，或进入高级模式手动填写 HOMO_F/HOMO_R。"
+        )
+    f_pos = f_positions[0]
+    r_pos = r_positions[0]
+    f_start = max(0, f_pos + len(sf) - arm_len)
+    r_end = min(len(seq), r_pos + arm_len)
+    homo_f = seq[f_start : f_pos + len(sf)]
+    homo_r = revcomp(seq[r_pos:r_end])
+    if len(homo_f) != arm_len or len(homo_r) != arm_len:
+        raise ValueError(
+            "同源臂长度超出骨架边界。请调小同源臂长度，或进入高级模式手动填写。"
+        )
+    return homo_f, homo_r, f"Auto HOMO arms from unique sites, length={arm_len}."
+
+
 def backbones_page(user, config):
     st.subheader("Backbones")
     conn = get_conn()
@@ -67,11 +113,9 @@ def backbones_page(user, config):
 
     st.markdown("#### Add / Update backbone")
     name = st.text_input("Backbone name", placeholder="e.g., pGreenII", key="bb_name")
-    enzyme_sites = st.text_input("Enzyme sites label (optional)", placeholder="e.g., BamHI/EcoRI", key="bb_enzyme_sites")
-    homo_f = st.text_area("HOMO_F (5'->3')", height=80, key="bb_homo_f")
-    homo_r = st.text_area("HOMO_R (5'->3')", height=80, key="bb_homo_r")
+    entry_mode = st.radio("Backbone setup mode", ["Basic", "Advanced"], horizontal=True, key="bb_entry_mode")
 
-    st.markdown("##### Vector map settings (optional)")
+    st.markdown("##### Vector sequence")
     vector_upload = st.file_uploader(
         "Upload vector sequence file (.fasta/.gbk/.dna etc.)",
         type=["fasta", "fa", "fna", "txt", "gb", "gbk", "genbank", "dna"],
@@ -95,16 +139,56 @@ def backbones_page(user, config):
         key="bb_vector_sequence",
         help="Paste full vector sequence or load from file above.",
     )
-    insertion_mode = st.selectbox(
-        "insertion_mode",
-        ["linear_join", "restriction_site_join"],
-        key="bb_insertion_mode",
-    )
-    restriction_site_f = st.text_input("restriction_site_F (sequence, optional)", key="bb_restriction_site_f")
-    restriction_site_r = st.text_input("restriction_site_R (sequence, optional)", key="bb_restriction_site_r")
-    junction_extra_bases_f = st.number_input("junction extra bases (5')", min_value=0, step=1, value=0, key="bb_jextra_f")
-    junction_extra_bases_r = st.number_input("junction extra bases (3')", min_value=0, step=1, value=0, key="bb_jextra_r")
-    vector_map_note = st.text_area("vector_map_note", height=60, key="bb_vector_map_note")
+
+    if entry_mode == "Basic":
+        st.markdown("##### Restriction sites and homology arms")
+        b1, b2, b3 = st.columns([2, 2, 1])
+        with b1:
+            enzyme_f_name = st.selectbox("Forward restriction site", list(ENZYME_SEQUENCES.keys()), index=0, key="bb_basic_enzyme_f")
+        with b2:
+            enzyme_r_name = st.selectbox("Reverse restriction site", list(ENZYME_SEQUENCES.keys()), index=1, key="bb_basic_enzyme_r")
+        with b3:
+            homology_arm_len = st.number_input("Homology arm length", min_value=12, max_value=60, value=21, step=1, key="bb_homology_arm_len")
+
+        restriction_site_f = ENZYME_SEQUENCES[enzyme_f_name]
+        restriction_site_r = ENZYME_SEQUENCES[enzyme_r_name]
+        enzyme_sites = f"{enzyme_f_name}/{enzyme_r_name}"
+        insertion_mode = "restriction_site_join"
+        junction_extra_bases_f = 0
+        junction_extra_bases_r = 0
+        vector_map_note = st.text_area("vector_map_note", height=60, key="bb_vector_map_note")
+
+        if st.button("Auto-generate HOMO_F/HOMO_R from vector", key="bb_auto_homo_btn"):
+            try:
+                auto_f, auto_r, msg = _auto_homology_from_sites(
+                    vector_sequence=vector_sequence,
+                    site_f=restriction_site_f,
+                    site_r=restriction_site_r,
+                    arm_len=int(homology_arm_len),
+                )
+                st.session_state["bb_homo_f"] = auto_f
+                st.session_state["bb_homo_r"] = auto_r
+                st.success(f"{msg} HOMO_F={auto_f}; HOMO_R={auto_r}")
+            except Exception as exc:
+                st.error(str(exc))
+
+        homo_f = st.text_area("HOMO_F (auto, editable)", height=70, key="bb_homo_f")
+        homo_r = st.text_area("HOMO_R (auto, editable)", height=70, key="bb_homo_r")
+    else:
+        enzyme_sites = st.text_input("Enzyme sites label (optional)", placeholder="e.g., BamHI/EcoRI", key="bb_enzyme_sites")
+        homo_f = st.text_area("HOMO_F (5'->3')", height=80, key="bb_homo_f")
+        homo_r = st.text_area("HOMO_R (5'->3')", height=80, key="bb_homo_r")
+        st.markdown("##### Advanced vector map settings")
+        insertion_mode = st.selectbox(
+            "insertion_mode",
+            ["linear_join", "restriction_site_join"],
+            key="bb_insertion_mode",
+        )
+        restriction_site_f = st.text_input("restriction_site_F (sequence, optional)", key="bb_restriction_site_f")
+        restriction_site_r = st.text_input("restriction_site_R (sequence, optional)", key="bb_restriction_site_r")
+        junction_extra_bases_f = st.number_input("junction extra bases (5')", min_value=0, step=1, value=0, key="bb_jextra_f")
+        junction_extra_bases_r = st.number_input("junction extra bases (3')", min_value=0, step=1, value=0, key="bb_jextra_r")
+        vector_map_note = st.text_area("vector_map_note", height=60, key="bb_vector_map_note")
 
     curr_snapshot = _snapshot(
         name=name,

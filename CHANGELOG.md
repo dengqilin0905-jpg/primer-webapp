@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.1.2 - 2026-05-26
+
+### Fixed
+
+- Sangon Excel export now clears the full order data area before writing current primers, preventing old template/order rows from leaking into new exports.
+- CDS primer design now recovers from strict-filter failure on high-GC 5' starts by selecting the closest end-anchored pair with explicit warnings instead of failing the whole run.
+- Primer design failure messages now include actionable Chinese guidance for adjusting Tm, primer length, GC range, homology arms, and stop-codon handling.
+
+### Changed
+
+- Backbones page now has Basic / Advanced setup modes.
+- Basic backbone setup can auto-generate HOMO_F/HOMO_R from a vector sequence when the selected restriction sites are unique.
+- Design page now keeps experimental decisions visible in Basic parameters and folds chemistry/frame-check controls into Advanced parameters.
+- `AGENT.md` now documents required reproduction, test-folder, error-message, UI, export, and release rules.
+
 ## v1.1.1 - 2026-05-19
 
 ### Added

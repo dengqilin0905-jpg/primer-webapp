@@ -152,8 +152,9 @@ def design_page(user, config):
 
     defaults = json.loads((backbones[0]["defaults_json"] or "{}"))
 
-    st.markdown("#### Parameters")
-    col1, col2, col3 = st.columns(3)
+    st.markdown("#### Basic parameters")
+    st.caption("Key choices that affect the final primers stay visible here. Advanced chemistry and warning settings are folded below.")
+    col1, col2 = st.columns(2)
     with col1:
         default_seq_type = st.selectbox("Default sequence type", ["CDS", "Promoter", "Other"], key="design_default_seq_type")
         default_remove_stop = st.checkbox(
@@ -168,7 +169,24 @@ def design_page(user, config):
         tm_max = st.number_input("Tm max (degC)", value=float(defaults.get("tm_max", 65.0)), step=0.5, key="design_tm_max")
         target_tm = st.number_input("Target Tm (degC)", value=float(defaults.get("target_tm", 60.0)), step=0.5, key="design_target_tm")
         tm_pair_delta_max = st.number_input("Max |TmF-TmR| (soft)", value=2.0, min_value=0.0, step=0.5, key="design_tm_pair_delta_max")
-    with col3:
+
+    with st.expander("Advanced parameters", expanded=False):
+        adv1, adv2, adv3 = st.columns(3)
+        with adv1:
+            gc_min = st.number_input("GC min (%)", value=40.0, min_value=0.0, max_value=100.0, step=1.0, key="design_gc_min")
+            gc_max = st.number_input("GC max (%)", value=60.0, min_value=0.0, max_value=100.0, step=1.0, key="design_gc_max")
+            non_cds_forbid_homopolymer = st.checkbox("Forbid AAAAA/TTTTT in non-CDS primers", value=True, key="design_non_cds_forbid_hp")
+        with adv2:
+            tm_priority_weight = st.number_input("Tm priority weight", value=2.5, min_value=0.1, step=0.1, key="design_tm_priority_weight")
+            cds_recovery_enable = st.checkbox("Enable CDS rescue when strict filters fail", value=True, key="design_cds_recovery_enable")
+            tm_delta_mode = st.selectbox("Tm delta mode", ["soft", "hard"], key="design_tm_delta_mode")
+        with adv3:
+            enable_frame_check = st.checkbox("Enable frame check", value=False, key="design_enable_frame_check")
+            construct_type = st.selectbox(
+                "Construct type",
+                ["CDS_no_tag", "N_terminal_tag", "C_terminal_tag", "promoter_or_non_coding"],
+                key="design_construct_type",
+            )
         tm_profile_label = st.selectbox("Tm Profile", ["SnapGene Preset", "Custom"], index=0, key="design_tm_profile")
         if tm_profile_label == "Custom":
             Na = st.number_input("Na+ (mM)", value=50.0, step=5.0, key="design_na")
@@ -181,33 +199,20 @@ def design_page(user, config):
             Na, Mg, dNTPs, primer_conc = 50.0, 1.5, 0.2, 250.0
             st.caption("Preset params: Na=50.0 mM, Mg=1.5 mM, dNTPs=0.2 mM, primer=250 nM")
 
-    st.markdown("#### Advanced frame check")
-    cfa, cfb, cfc = st.columns(3)
-    with cfa:
-        enable_frame_check = st.checkbox("enable_frame_check", value=False, key="design_enable_frame_check")
-    with cfb:
-        construct_type = st.selectbox(
-            "construct_type",
-            ["CDS_no_tag", "N_terminal_tag", "C_terminal_tag", "promoter_or_non_coding"],
-            key="design_construct_type",
-        )
-    with cfc:
-        st.caption("Frame check applies warnings into result, History, and Excel remarks.")
-
     policy_defaults = {
-        "gc_min": 40.0,
-        "gc_max": 60.0,
+        "gc_min": float(gc_min),
+        "gc_max": float(gc_max),
         "length_mode": "adaptive_soft",
         "cds_len_pref": [18, 21],
         "non_cds_len_pref": [20, 26],
-        "tm_priority_weight": 2.5,
-        "non_cds_forbid_homopolymer": True,
+        "tm_priority_weight": float(tm_priority_weight),
+        "non_cds_forbid_homopolymer": bool(non_cds_forbid_homopolymer),
         "tm_pair_delta_max": float(tm_pair_delta_max),
-        "tm_delta_mode": "soft",
+        "tm_delta_mode": str(tm_delta_mode),
         "tm_profile": tm_profile,
-        "cds_recovery_enable": True,
+        "cds_recovery_enable": bool(cds_recovery_enable),
     }
-    st.caption("Design policy: Tm-priority + GC 40-60 hard filter + adaptive soft length preference + soft |TmF-TmR| + CDS auto recovery.")
+    st.caption(f"Design policy: Tm-priority + GC {gc_min:.0f}-{gc_max:.0f}% + adaptive soft length + {tm_delta_mode} |TmF-TmR| + CDS rescue.")
 
     search = st.text_input("Filter genes by name (optional)", key="design_gene_filter")
     if search:

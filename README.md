@@ -93,12 +93,37 @@ Open:
    - Sangon Excel
    - GenBank map (`.gbk` / ZIP)
 
+## Basic vs Advanced design controls
+
+- Basic mode keeps experiment-changing decisions visible:
+  - stop codon removal/retention
+  - Tm min / Tm max / Target Tm
+  - primer length range
+  - homology arm length
+- Advanced mode contains GC limits, ion/Tm profile parameters, frame check, and manual vector/restriction-site details.
+- When a vector sequence is uploaded and the selected restriction sites are unique, the Backbones page can auto-generate HOMO_F/HOMO_R from the selected homology-arm length.
+
+## Canonical local QA data
+
+Use the `test/` folder for release smoke tests:
+
+- Backbone: `pGreenII-62SK.dna`
+- Restriction sites: BamHI / EcoRI
+- Expected 21 bp homology arms:
+  - `CGCTCTAGAACTAGTGGATCC`
+  - `GATAAGCTTGATATCGAATTC`
+- CDS inserts:
+  - `ZmMYBR26.dna`
+  - `ZmMYBS1.dna`
+- Required CDS option: keep terminal stop codon (`remove_stop=False`).
+
 ## Sangon Excel export guarantees
 
 - Uses `app/sangon_template.xlsx` as template baseline.
 - Keeps template format, formula, data validation, and headers.
 - Auto-extends rows when primer count exceeds base template range.
 - Writes profile fields into template header.
+- Clears the full order data area before writing primers so each export contains only the current run.
 
 ## Repository layout
 
