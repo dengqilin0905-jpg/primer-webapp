@@ -6,7 +6,7 @@ import streamlit as st
 from db import can_delete_backbone, get_conn
 from file_safety import validate_upload
 from primer_design import normalize_seq, revcomp
-from seq_io import parse_uploaded_file
+from seq_io import parse_uploaded_records
 
 ALLOWED_VECTOR_EXTS = {".fasta", ".fa", ".fna", ".txt", ".gb", ".gbk", ".genbank", ".dna"}
 ENZYME_SEQUENCES = {
@@ -33,6 +33,10 @@ def _snapshot(
     junction_extra_bases_f: int,
     junction_extra_bases_r: int,
     vector_map_note: str,
+    vector_features_json: str = "[]",
+    vector_topology: str = "",
+    vector_source_format: str = "",
+    vector_record_name: str = "",
 ) -> dict:
     return {
         "name": (name or "").strip(),
@@ -46,6 +50,10 @@ def _snapshot(
         "junction_extra_bases_f": int(junction_extra_bases_f or 0),
         "junction_extra_bases_r": int(junction_extra_bases_r or 0),
         "vector_map_note": (vector_map_note or "").strip(),
+        "vector_features_json": vector_features_json or "[]",
+        "vector_topology": (vector_topology or "").strip(),
+        "vector_source_format": (vector_source_format or "").strip(),
+        "vector_record_name": (vector_record_name or "").strip(),
     }
 
 
@@ -54,17 +62,19 @@ def _bb_label(row) -> str:
     return f"{row['name']} [{enz}]" if enz else f"{row['name']} [no-enzyme]"
 
 
-def _load_vector_from_upload(uploaded_file, max_upload_size_mb: int) -> tuple[str, str]:
+def _load_vector_from_upload(uploaded_file, max_upload_size_mb: int) -> tuple[dict, str]:
     validate_upload(uploaded_file, ALLOWED_VECTOR_EXTS, int(max_upload_size_mb))
-    recs = parse_uploaded_file(uploaded_file)
+    recs = parse_uploaded_records(uploaded_file)
     if not recs:
         raise ValueError("No sequence found in uploaded vector file.")
-    seq = normalize_seq(recs[0][1])
+    rec = recs[0]
+    seq = normalize_seq(rec["sequence"])
     if not seq:
         raise ValueError("Uploaded vector sequence is empty after normalization.")
+    rec["sequence"] = seq
     if len(recs) > 1:
-        return seq, f"Loaded first record from file ({len(recs)} records found)."
-    return seq, "Vector sequence loaded from uploaded file."
+        return rec, f"Loaded first record from file ({len(recs)} records found)."
+    return rec, "Vector sequence loaded from uploaded file."
 
 
 def _find_site_positions(seq: str, site: str) -> list[int]:
@@ -127,9 +137,16 @@ def backbones_page(user, config):
             st.warning("Please choose a vector file first.")
         else:
             try:
-                seq, msg = _load_vector_from_upload(vector_upload, int(config.max_upload_size_mb))
+                rec, msg = _load_vector_from_upload(vector_upload, int(config.max_upload_size_mb))
+                seq = rec["sequence"]
                 st.session_state["bb_vector_sequence"] = seq
-                st.success(f"{msg} Length={len(seq)} bp.")
+                st.session_state["bb_vector_meta_sequence"] = seq
+                st.session_state["bb_vector_features_json"] = json.dumps(rec.get("features") or [], ensure_ascii=False)
+                st.session_state["bb_vector_topology"] = rec.get("topology") or ""
+                st.session_state["bb_vector_source_format"] = rec.get("source_format") or ""
+                st.session_state["bb_vector_record_name"] = rec.get("record_name") or ""
+                feature_count = len(rec.get("features") or [])
+                st.success(f"{msg} Length={len(seq)} bp; features={feature_count}.")
             except Exception as exc:
                 st.error(f"Vector import failed: {exc}")
 
@@ -139,6 +156,16 @@ def backbones_page(user, config):
         key="bb_vector_sequence",
         help="Paste full vector sequence or load from file above.",
     )
+    if normalize_seq(st.session_state.get("bb_vector_meta_sequence", "")) == normalize_seq(vector_sequence):
+        vector_features_json = st.session_state.get("bb_vector_features_json", "[]")
+        vector_topology = st.session_state.get("bb_vector_topology", "")
+        vector_source_format = st.session_state.get("bb_vector_source_format", "")
+        vector_record_name = st.session_state.get("bb_vector_record_name", "")
+    else:
+        vector_features_json = "[]"
+        vector_topology = ""
+        vector_source_format = ""
+        vector_record_name = ""
 
     if entry_mode == "Basic":
         st.markdown("##### Restriction sites and homology arms")
@@ -202,6 +229,10 @@ def backbones_page(user, config):
         junction_extra_bases_f=int(junction_extra_bases_f),
         junction_extra_bases_r=int(junction_extra_bases_r),
         vector_map_note=vector_map_note,
+        vector_features_json=vector_features_json,
+        vector_topology=vector_topology,
+        vector_source_format=vector_source_format,
+        vector_record_name=vector_record_name,
     )
     saved_snapshot = st.session_state.get("bb_saved_snapshot", {})
     if curr_snapshot != saved_snapshot and any(curr_snapshot.values()):
@@ -236,9 +267,10 @@ def backbones_page(user, config):
                         user_id, name, enzyme_sites, homo_f, homo_r,
                         vector_sequence, insertion_mode, restriction_site_f, restriction_site_r,
                         junction_extra_bases_f, junction_extra_bases_r, vector_map_note,
+                        vector_features_json, vector_topology, vector_source_format, vector_record_name,
                         defaults_json, created_at
                     )
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(user_id, name, enzyme_sites) DO UPDATE SET
                         homo_f=excluded.homo_f,
                         homo_r=excluded.homo_r,
@@ -249,6 +281,10 @@ def backbones_page(user, config):
                         junction_extra_bases_f=excluded.junction_extra_bases_f,
                         junction_extra_bases_r=excluded.junction_extra_bases_r,
                         vector_map_note=excluded.vector_map_note,
+                        vector_features_json=excluded.vector_features_json,
+                        vector_topology=excluded.vector_topology,
+                        vector_source_format=excluded.vector_source_format,
+                        vector_record_name=excluded.vector_record_name,
                         defaults_json=excluded.defaults_json
                     """,
                     (
@@ -264,6 +300,10 @@ def backbones_page(user, config):
                         curr_snapshot["junction_extra_bases_f"],
                         curr_snapshot["junction_extra_bases_r"],
                         curr_snapshot["vector_map_note"],
+                        curr_snapshot["vector_features_json"],
+                        curr_snapshot["vector_topology"],
+                        curr_snapshot["vector_source_format"],
+                        curr_snapshot["vector_record_name"],
                         json.dumps(defaults, ensure_ascii=False),
                         time.strftime("%Y-%m-%d %H:%M:%S"),
                     ),
@@ -282,6 +322,10 @@ def backbones_page(user, config):
             x = dict(r)
             x["display"] = _bb_label(r)
             x["vector_len"] = len(normalize_seq(r["vector_sequence"] or ""))
+            try:
+                feature_count = len(json.loads(x.get("vector_features_json") or "[]"))
+            except Exception:
+                feature_count = 0
             show_rows.append(
                 {
                     "id": x["id"],
@@ -290,6 +334,8 @@ def backbones_page(user, config):
                     "restriction_site_f": x.get("restriction_site_f", ""),
                     "restriction_site_r": x.get("restriction_site_r", ""),
                     "vector_len": x["vector_len"],
+                    "features": feature_count,
+                    "topology": x.get("vector_topology", ""),
                     "vector_map_note": x.get("vector_map_note", ""),
                 }
             )

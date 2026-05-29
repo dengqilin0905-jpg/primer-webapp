@@ -10,6 +10,7 @@ from excel_export import TEMPLATE_PATH, export_from_template_bytes, validate_pri
 from fragment_export import build_fragment_length_simple_txt, build_fragment_length_txt, build_non_cds_amplicon_fasta
 from genbank_export import build_genbank_bundle
 from primer_design import design_primers_for_gene
+from snapgene_export import build_snapgene_dna_bundle, find_snapgene_cli
 from templates_ui import get_default_template_id, get_effective_template_bytes, get_user_templates
 
 
@@ -132,6 +133,24 @@ def _cartesian_items(backbones, backbone_ids, genes, seq_type, remove_stop):
 
 def _format_batch_mode(x: str) -> str:
     return {"mapping": "Mapping (existing)", "cartesian": "Cartesian (Gene × Backbone)"}.get(x, x)
+
+
+def _with_map_options(
+    rows: list[dict[str, Any]],
+    feature_type: str,
+    feature_name: str,
+    feature_note: str,
+    homology_type: str,
+) -> list[dict[str, Any]]:
+    out = []
+    for row in rows:
+        item = dict(row)
+        item["insert_feature_type"] = feature_type
+        item["insert_feature_name"] = (feature_name or "").strip() or item.get("gene_name") or "insert"
+        item["insert_feature_note"] = (feature_note or "").strip() or "Inserted sequence"
+        item["homology_feature_type"] = homology_type
+        out.append(item)
+    return out
 
 
 def design_page(user, config):
@@ -459,6 +478,10 @@ def design_page(user, config):
                         out["junction_extra_bases_f"] = int(bb["junction_extra_bases_f"] or 0)
                         out["junction_extra_bases_r"] = int(bb["junction_extra_bases_r"] or 0)
                         out["vector_map_note"] = bb["vector_map_note"]
+                        out["vector_features_json"] = bb["vector_features_json"]
+                        out["vector_topology"] = bb["vector_topology"]
+                        out["vector_source_format"] = bb["vector_source_format"]
+                        out["vector_record_name"] = bb["vector_record_name"]
                         all_results.append(out)
 
                         conn.execute(
@@ -635,11 +658,60 @@ def design_page(user, config):
         else:
             st.info("No non-CDS amplicon sequences in this batch.")
 
-        try:
-            gb_name, gb_data, gb_mime = build_genbank_bundle(all_result_rows)
-            st.download_button("Download GenBank map", data=gb_data, file_name=gb_name, mime=gb_mime, key="design_download_genbank")
-        except Exception as exc:
-            st.warning(f"GenBank export unavailable: {exc}")
+        st.markdown("#### Construct map export")
+        first_seq_type = str(all_result_rows[0].get("seq_type") or "CDS").lower()
+        default_feature = "CDS" if first_seq_type == "cds" else ("promoter" if first_seq_type == "promoter" else "misc_feature")
+        m1, m2, m3 = st.columns([1, 2, 1])
+        with m1:
+            insert_feature_type = st.selectbox(
+                "Insert feature type",
+                ["CDS", "promoter", "misc_feature"],
+                index=["CDS", "promoter", "misc_feature"].index(default_feature),
+                key="design_map_insert_feature_type",
+            )
+        with m2:
+            default_feature_name = all_result_rows[0].get("gene_name", "") if len(all_result_rows) == 1 else ""
+            insert_feature_name = st.text_input(
+                "Insert feature name",
+                value=default_feature_name,
+                placeholder="Blank = use each gene name",
+                key="design_map_insert_feature_name",
+            )
+        with m3:
+            export_genbank = st.checkbox("Export GenBank map", value=True, key="design_map_export_genbank")
+        with st.expander("Advanced map options", expanded=False):
+            insert_feature_note = st.text_input("Insert feature note/color", value="", key="design_map_insert_feature_note")
+            homology_feature_type = st.selectbox(
+                "Homology arm feature type",
+                ["misc_feature", "primer_bind"],
+                key="design_map_homology_feature_type",
+            )
+            st.caption("Insert direction is inferred from the homology arms; if inference fails, the export will show a Chinese action hint.")
+
+        map_rows = _with_map_options(all_result_rows, insert_feature_type, insert_feature_name, insert_feature_note, homology_feature_type)
+        if export_genbank:
+            try:
+                gb_name, gb_data, gb_mime = build_genbank_bundle(map_rows)
+                st.download_button("Download GenBank map", data=gb_data, file_name=gb_name, mime=gb_mime, key="design_download_genbank")
+            except Exception as exc:
+                st.warning(f"GenBank 图谱导出失败：{exc}")
+
+        snapgene_exe, _ = find_snapgene_cli()
+        if snapgene_exe is None:
+            st.info("当前环境未检测到 SnapGene Desktop CLI，已提供 GenBank `.gbk`；本地安装 SnapGene 后可导出 `.dna`。")
+        else:
+            try:
+                dna_name, dna_data, dna_mime, used_exe = build_snapgene_dna_bundle(map_rows)
+                st.download_button(
+                    "Download SnapGene DNA map",
+                    data=dna_data,
+                    file_name=dna_name,
+                    mime=dna_mime,
+                    key="design_download_snapgene_dna",
+                )
+                st.caption(f"SnapGene CLI: {used_exe}")
+            except Exception as exc:
+                st.warning(f"SnapGene `.dna` 转换失败：{exc}")
 
     failures = st.session_state.get("last_failures", [])
     if failures:

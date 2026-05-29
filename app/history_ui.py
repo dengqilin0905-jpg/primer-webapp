@@ -7,6 +7,7 @@ from db import get_conn
 from excel_export import TEMPLATE_PATH, export_from_template_bytes, validate_primer_rows
 from fragment_export import build_fragment_length_simple_txt, build_fragment_length_txt, build_non_cds_amplicon_fasta
 from genbank_export import build_genbank_bundle
+from snapgene_export import build_snapgene_dna_bundle, find_snapgene_cli
 from templates_ui import get_default_template_id, get_effective_template_bytes, get_user_templates
 
 
@@ -47,6 +48,18 @@ def _fmt_delta(v):
 def _bb_label(r) -> str:
     enz = (r["enzyme_sites"] or "").strip()
     return f"{r['backbone_name']} [{enz}]" if enz else f"{r['backbone_name']} [no-enzyme]"
+
+
+def _with_map_options(primer_rows, feature_type: str, feature_name: str, feature_note: str, homology_type: str):
+    out = []
+    for row in primer_rows:
+        item = dict(row)
+        item["insert_feature_type"] = feature_type
+        item["insert_feature_name"] = (feature_name or "").strip() or item.get("gene_name") or "insert"
+        item["insert_feature_note"] = (feature_note or "").strip() or "Inserted sequence"
+        item["homology_feature_type"] = homology_type
+        out.append(item)
+    return out
 
 
 def history_page(user, config):
@@ -138,7 +151,11 @@ def history_page(user, config):
             b.restriction_site_r,
             b.junction_extra_bases_f,
             b.junction_extra_bases_r,
-            b.vector_map_note
+            b.vector_map_note,
+            b.vector_features_json,
+            b.vector_topology,
+            b.vector_source_format,
+            b.vector_record_name
         FROM primers p
         JOIN genes g ON g.id = p.gene_id
         JOIN primer_runs r ON r.id = p.run_id
@@ -204,6 +221,10 @@ def history_page(user, config):
                 "junction_extra_bases_f": int(p["junction_extra_bases_f"] or 0),
                 "junction_extra_bases_r": int(p["junction_extra_bases_r"] or 0),
                 "vector_map_note": p["vector_map_note"] or "",
+                "vector_features_json": p["vector_features_json"] or "[]",
+                "vector_topology": p["vector_topology"] or "",
+                "vector_source_format": p["vector_source_format"] or "",
+                "vector_record_name": p["vector_record_name"] or "",
             }
         )
 
@@ -267,14 +288,62 @@ def history_page(user, config):
         else:
             st.info("This run has no non-CDS amplicon sequences.")
 
-        gb_name, gb_data, gb_mime = build_genbank_bundle(primer_rows)
-        st.download_button(
-            "Download GenBank map",
-            data=gb_data,
-            file_name=f"Run_{selected_run}_{gb_name}",
-            mime=gb_mime,
-            key=f"history_download_genbank_{selected_run}",
-        )
+        st.markdown("#### Construct map export")
+        first_seq_type = str(primer_rows[0].get("seq_type") or "CDS").lower() if primer_rows else "cds"
+        default_feature = "CDS" if first_seq_type == "cds" else ("promoter" if first_seq_type == "promoter" else "misc_feature")
+        h1, h2, h3 = st.columns([1, 2, 1])
+        with h1:
+            insert_feature_type = st.selectbox(
+                "Insert feature type",
+                ["CDS", "promoter", "misc_feature"],
+                index=["CDS", "promoter", "misc_feature"].index(default_feature),
+                key=f"history_map_insert_feature_type_{selected_run}",
+            )
+        with h2:
+            default_feature_name = primer_rows[0].get("gene_name", "") if len(primer_rows) == 1 else ""
+            insert_feature_name = st.text_input(
+                "Insert feature name",
+                value=default_feature_name,
+                placeholder="Blank = use each gene name",
+                key=f"history_map_insert_feature_name_{selected_run}",
+            )
+        with h3:
+            export_genbank = st.checkbox("Export GenBank map", value=True, key=f"history_map_export_genbank_{selected_run}")
+        with st.expander("Advanced map options", expanded=False):
+            insert_feature_note = st.text_input("Insert feature note/color", value="", key=f"history_map_insert_feature_note_{selected_run}")
+            homology_feature_type = st.selectbox(
+                "Homology arm feature type",
+                ["misc_feature", "primer_bind"],
+                key=f"history_map_homology_feature_type_{selected_run}",
+            )
+
+        map_rows = _with_map_options(primer_rows, insert_feature_type, insert_feature_name, insert_feature_note, homology_feature_type)
+        if export_genbank:
+            gb_name, gb_data, gb_mime = build_genbank_bundle(map_rows)
+            st.download_button(
+                "Download GenBank map",
+                data=gb_data,
+                file_name=f"Run_{selected_run}_{gb_name}",
+                mime=gb_mime,
+                key=f"history_download_genbank_{selected_run}",
+            )
+
+        snapgene_exe, _ = find_snapgene_cli()
+        if snapgene_exe is None:
+            st.info("当前环境未检测到 SnapGene Desktop CLI，已提供 GenBank `.gbk`；本地安装 SnapGene 后可导出 `.dna`。")
+        else:
+            try:
+                dna_name, dna_data, dna_mime, used_exe = build_snapgene_dna_bundle(map_rows)
+                st.download_button(
+                    "Download SnapGene DNA map",
+                    data=dna_data,
+                    file_name=f"Run_{selected_run}_{dna_name}",
+                    mime=dna_mime,
+                    key=f"history_download_snapgene_dna_{selected_run}",
+                )
+                st.caption(f"SnapGene CLI: {used_exe}")
+            except Exception as exc:
+                st.warning(f"SnapGene `.dna` 转换失败：{exc}")
     except Exception as exc:
         st.error(f"Re-export blocked by validation: {exc}")
 

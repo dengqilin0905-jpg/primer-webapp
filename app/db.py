@@ -131,6 +131,10 @@ def _migrate_backbones_unique(conn: sqlite3.Connection):
             junction_extra_bases_f INTEGER NOT NULL DEFAULT 0,
             junction_extra_bases_r INTEGER NOT NULL DEFAULT 0,
             vector_map_note TEXT NOT NULL DEFAULT '',
+            vector_features_json TEXT NOT NULL DEFAULT '[]',
+            vector_topology TEXT NOT NULL DEFAULT '',
+            vector_source_format TEXT NOT NULL DEFAULT '',
+            vector_record_name TEXT NOT NULL DEFAULT '',
             defaults_json TEXT,
             created_at TEXT NOT NULL,
             UNIQUE(user_id, name, enzyme_sites),
@@ -145,12 +149,17 @@ def _migrate_backbones_unique(conn: sqlite3.Connection):
     jef_expr = "COALESCE(junction_extra_bases_f, 0)" if "junction_extra_bases_f" in old_cols else "0"
     jer_expr = "COALESCE(junction_extra_bases_r, 0)" if "junction_extra_bases_r" in old_cols else "0"
     note_expr = "COALESCE(vector_map_note, '')" if "vector_map_note" in old_cols else "''"
+    features_expr = "COALESCE(vector_features_json, '[]')" if "vector_features_json" in old_cols else "'[]'"
+    topology_expr = "COALESCE(vector_topology, '')" if "vector_topology" in old_cols else "''"
+    source_format_expr = "COALESCE(vector_source_format, '')" if "vector_source_format" in old_cols else "''"
+    record_name_expr = "COALESCE(vector_record_name, '')" if "vector_record_name" in old_cols else "''"
     cur.execute(
         f"""
         INSERT INTO backbones_new(
             id, user_id, name, enzyme_sites, homo_f, homo_r,
             vector_sequence, insertion_mode, restriction_site_f, restriction_site_r,
             junction_extra_bases_f, junction_extra_bases_r, vector_map_note,
+            vector_features_json, vector_topology, vector_source_format, vector_record_name,
             defaults_json, created_at
         )
         SELECT
@@ -162,6 +171,10 @@ def _migrate_backbones_unique(conn: sqlite3.Connection):
             {jef_expr},
             {jer_expr},
             {note_expr},
+            {features_expr},
+            {topology_expr},
+            {source_format_expr},
+            {record_name_expr},
             defaults_json, created_at
         FROM backbones;
         """
@@ -224,6 +237,10 @@ def init_db(conn: sqlite3.Connection):
             junction_extra_bases_f INTEGER NOT NULL DEFAULT 0,
             junction_extra_bases_r INTEGER NOT NULL DEFAULT 0,
             vector_map_note TEXT NOT NULL DEFAULT '',
+            vector_features_json TEXT NOT NULL DEFAULT '[]',
+            vector_topology TEXT NOT NULL DEFAULT '',
+            vector_source_format TEXT NOT NULL DEFAULT '',
+            vector_record_name TEXT NOT NULL DEFAULT '',
             defaults_json TEXT,
             created_at TEXT NOT NULL,
             UNIQUE(user_id, name, enzyme_sites),
@@ -351,6 +368,14 @@ def init_db(conn: sqlite3.Connection):
         cur.execute("ALTER TABLE backbones ADD COLUMN junction_extra_bases_r INTEGER NOT NULL DEFAULT 0")
     if "vector_map_note" not in backbone_cols:
         cur.execute("ALTER TABLE backbones ADD COLUMN vector_map_note TEXT NOT NULL DEFAULT ''")
+    if "vector_features_json" not in backbone_cols:
+        cur.execute("ALTER TABLE backbones ADD COLUMN vector_features_json TEXT NOT NULL DEFAULT '[]'")
+    if "vector_topology" not in backbone_cols:
+        cur.execute("ALTER TABLE backbones ADD COLUMN vector_topology TEXT NOT NULL DEFAULT ''")
+    if "vector_source_format" not in backbone_cols:
+        cur.execute("ALTER TABLE backbones ADD COLUMN vector_source_format TEXT NOT NULL DEFAULT ''")
+    if "vector_record_name" not in backbone_cols:
+        cur.execute("ALTER TABLE backbones ADD COLUMN vector_record_name TEXT NOT NULL DEFAULT ''")
 
     run_cols = {r[1] for r in cur.execute("PRAGMA table_info(primer_runs)").fetchall()}
     if "status" not in run_cols:

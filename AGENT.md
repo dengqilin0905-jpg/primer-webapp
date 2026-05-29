@@ -52,6 +52,20 @@ Every Sangon Excel export must contain only the primers from the current run/exp
 
 When touching export code, verify two consecutive exports with different primer rows; the second file must not contain the first file's content.
 
+## Construct Map Export Rule
+
+Map export must prioritize GenBank `.gb/.gbk` as the stable source format. Do not hard-depend on native SnapGene `.dna` generation.
+
+If uploaded backbone features can be read from GenBank or SnapGene `.dna`, preserve them as much as possible in the exported construct map.
+
+The inserted fragment must be annotated according to the user's selected feature type: `CDS`, `promoter`, or `misc_feature`.
+
+Forward/reverse homology arms and restriction sites must be written as features with clear labels such as `F_homology_arm`, `R_homology_arm`, `BamHI`, and `EcoRI`.
+
+Native SnapGene `.dna` export may be offered only as an optional conversion step through a verified local SnapGene Desktop CLI. If the CLI is absent or conversion fails, keep `.gbk` export available and show a Chinese action hint.
+
+After every construct-map export fix, validate with the `test/` folder pGreenII-62SK + BamHI/EcoRI + ZmMYBR26/ZmMYBS1 scenario.
+
 ## Branch and Release Rule (Mandatory)
 
 For this repository, any software update intended for release must end on `main`.

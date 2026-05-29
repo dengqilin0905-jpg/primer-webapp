@@ -32,6 +32,7 @@ It keeps per-user private data, supports multi-format sequence import, batch des
   - Fragment TXT (full/simple)
   - non-CDS FASTA
   - SnapGene-compatible GenBank (`.gbk`) or ZIP bundle for multi-combo runs
+  - optional SnapGene `.dna` map export when SnapGene Desktop CLI is installed on the computer running the app
 - History:
   - keeps each run with auto status (`pending/success/fail`)
   - supports re-export
@@ -80,6 +81,21 @@ Open:
 - If `.dna` parse fails, the app shows clear per-file errors and continues processing other files.
 - Binary files mislabeled as `.fa/.txt` are content-checked and routed safely.
 
+## SnapGene `.dna` export notes
+
+- GenBank `.gbk` map export is always generated first and is the stable source format.
+- Native SnapGene `.dna` export is optional and requires SnapGene Desktop on the machine running this app.
+- The app checks `SNAPGENE_EXE` first, then common paths including `D:\study\snapgene\SnapGene.exe` and `C:\Program Files\SnapGene\SnapGene.exe`.
+- For a custom install path on Windows, set an environment variable before starting the app:
+
+```powershell
+$env:SNAPGENE_EXE="D:\path\to\SnapGene.exe"
+streamlit run app/app.py --server.address 127.0.0.1 --server.port 8501
+```
+
+- If SnapGene is not installed or CLI conversion fails, the app still provides the annotated `.gbk` file and shows a Chinese action hint.
+- For the hosted website, users do not need SnapGene locally unless the website server itself is configured with SnapGene Desktop CLI.
+
 ## Design workflow
 
 1. Add backbones (with HOMO arms, optional vector sequence and restriction settings).
@@ -92,6 +108,7 @@ Open:
 5. Export:
    - Sangon Excel
    - GenBank map (`.gbk` / ZIP)
+   - SnapGene DNA map (`.dna` / ZIP) when SnapGene Desktop CLI is available
 
 ## Basic vs Advanced design controls
 
@@ -146,5 +163,6 @@ scripts/
 ```bash
 python scripts/check_indent.py
 python -m py_compile app/*.py
+python scripts/qa_map_export.py
 ```
 

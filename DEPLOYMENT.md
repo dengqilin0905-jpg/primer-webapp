@@ -48,6 +48,8 @@ git push -u origin feature/<your-feature>
 
 Then open a PR into `main`.
 
+Pushing to GitHub is not the same as updating the live website. The hosted app changes only after the `main` branch is deployed successfully by the GitHub Actions workflow or an equivalent release process.
+
 ## 3) GitHub Actions auto deploy to server
 
 This repository supports deployment from GitHub Actions to your Linux server over SSH.
@@ -125,6 +127,7 @@ Notes:
 
 - This project uses SQLite by default; for Streamlit Cloud, DB persistence depends on platform storage behavior.
 - For lightweight internal demo it works; for larger multi-user production use, migrate DB backend.
+- Optional SnapGene `.dna` export runs on the machine that hosts the app. Local users need SnapGene Desktop installed locally; website users only get server-side `.dna` export if SnapGene Desktop CLI is installed and licensed on the server.
 
 ## 5) Netlify statement
 

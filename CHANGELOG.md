@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Annotated construct map export now preserves readable backbone features from GenBank/SnapGene uploads when available.
+- Optional SnapGene Desktop CLI conversion can export `.dna` maps from generated `.gbk` files.
+- Added `scripts/qa_map_export.py` to validate primer generation, Sangon Excel export, GenBank map annotations, and optional SnapGene conversion with the canonical `test/` data.
+
+### Changed
+
+- Design and History map export controls now include insert feature type/name and advanced homology-arm annotation options.
+- README, DEPLOYMENT, and AGENT rules now document local SnapGene Desktop requirements and the GitHub-vs-website deployment boundary.
+
 ## v1.1.2 - 2026-05-26
 
 ### Fixed
