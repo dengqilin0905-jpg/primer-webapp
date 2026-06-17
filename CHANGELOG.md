@@ -13,6 +13,10 @@
 - Design and History map export controls now include insert feature type/name and advanced homology-arm annotation options.
 - README, DEPLOYMENT, and AGENT rules now document local SnapGene Desktop requirements and the GitHub-vs-website deployment boundary.
 
+### Fixed
+
+- Sangon Excel exports now reset order header cells `B4:B14` to `0` before applying the current user's saved Profile fields, preventing personal header details from leaking through built-in or uploaded templates.
+
 ## v1.1.2 - 2026-05-26
 
 ### Fixed

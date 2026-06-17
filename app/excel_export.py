@@ -20,10 +20,8 @@ def _get_main_sheet(wb):
     return wb[wb.sheetnames[0]]
 
 
-def _fill_header(ws, profile: dict | None):
-    if not profile:
-        return
-    mapping = {
+HEADER_DEFAULT_VALUE = 0
+HEADER_PROFILE_CELLS = {
         "orderer_name": "B4",
         "mobile": "B5",
         "email": "B6",
@@ -35,8 +33,14 @@ def _fill_header(ws, profile: dict | None):
         "invoice_with_goods": "B12",
         "shipping_address": "B13",
         "header_note": "B14",
-    }
-    for k, cell in mapping.items():
+}
+
+
+def _fill_header(ws, profile: dict | None):
+    for cell in HEADER_PROFILE_CELLS.values():
+        ws[cell].value = HEADER_DEFAULT_VALUE
+
+    for k, cell in HEADER_PROFILE_CELLS.items():
         v = profile.get(k) if profile else None
         if v is not None and v != "":
             ws[cell].value = v

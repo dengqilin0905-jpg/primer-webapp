@@ -139,7 +139,8 @@ Use the `test/` folder for release smoke tests:
 - Uses `app/sangon_template.xlsx` as template baseline.
 - Keeps template format, formula, data validation, and headers.
 - Auto-extends rows when primer count exceeds base template range.
-- Writes profile fields into template header.
+- Resets order header cells `B4:B14` to `0` before every export, then writes only the current user's saved profile fields.
+- Does not inherit personal header values from the built-in template or a user-uploaded template when profile fields are blank.
 - Clears the full order data area before writing primers so each export contains only the current run.
 
 ## Repository layout

@@ -50,6 +50,8 @@ If a user uploads a vector map and restriction sites are unique, Basic mode shou
 
 Every Sangon Excel export must contain only the primers from the current run/export request. It must not retain old primer names, sequences, remarks, row numbers, or stale order rows from the built-in template or a user-uploaded template.
 
+Every Sangon Excel export must reset order header cells `B4:B14` to `0` before writing current-user Profile fields. Blank Profile fields must stay `0`; never inherit personal header data from the built-in template or from a user-uploaded template.
+
 When touching export code, verify two consecutive exports with different primer rows; the second file must not contain the first file's content.
 
 ## Construct Map Export Rule
