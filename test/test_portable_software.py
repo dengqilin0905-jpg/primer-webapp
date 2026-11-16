@@ -92,7 +92,8 @@ class StandaloneAppTests(unittest.TestCase):
         self.assertTrue(at.session_state['last_run_id']);self.assertFalse(at.session_state['last_failures'])
         self.assertGreater(len(at.get('download_button')),0)
     def test_ci_cannot_deploy_on_main_push(self):
-        s=(REPO_ROOT/'.github/workflows/deploy.yml').read_text();self.assertNotIn('push:',s);self.assertNotIn('secrets.',s);self.assertNotIn('remote_deploy',s)
+        self.assertFalse((REPO_ROOT/'.github/workflows/deploy.yml').exists())
+        s=(REPO_ROOT/'.github/workflows/software-ci.yml').read_text();self.assertNotIn('push:',s);self.assertNotIn('secrets.',s);self.assertNotIn('remote_deploy',s)
         s=(REPO_ROOT/'scripts/remote_deploy.sh').read_text();self.assertNotIn('rm -rf',s);self.assertNotIn('systemctl',s)
 
 if __name__=='__main__':unittest.main()

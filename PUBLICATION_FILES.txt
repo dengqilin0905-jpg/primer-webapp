@@ -1,5 +1,5 @@
 .env.server.example
-.github/workflows/deploy.yml
+.github/workflows/software-ci.yml
 .gitignore
 AGENT.md
 CHANGELOG.md
