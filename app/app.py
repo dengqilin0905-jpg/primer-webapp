@@ -6,6 +6,8 @@ from genes_ui import genes_page
 from design_ui import design_page
 from history_ui import history_page
 from templates_ui import templates_page
+from project_ui import project_contract_page
+from verification_ui import sequencing_verification_page
 from config import load_config
 from file_safety import ensure_temp_dir, cleanup_old_temp_files
 
@@ -47,7 +49,7 @@ if st.sidebar.button("Logout"):
     logout()
     st.rerun()
 
-tabs = st.tabs(["Profile", "Backbones", "Genes (Batch Import)", "Templates", "Design (Batch)", "History"])
+tabs = st.tabs(["Profile", "Backbones", "Genes (Batch Import)", "Templates", "Design (Batch)", "Contract Project", "History", "Sequencing Verification"])
 with tabs[0]:
     profile_page(user)
 with tabs[1]:
@@ -59,4 +61,9 @@ with tabs[3]:
 with tabs[4]:
     design_page(user, CFG)
 with tabs[5]:
+    project_contract_page(user, CFG)
+with tabs[6]:
     history_page(user, CFG)
+
+with tabs[7]:
+    sequencing_verification_page(user, CFG)

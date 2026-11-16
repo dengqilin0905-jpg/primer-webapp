@@ -1,14 +1,17 @@
+from sequencing_ui import sequencing_download
 import json
 import math
 
 import streamlit as st
 
 from db import get_conn
-from excel_export import TEMPLATE_PATH, export_from_template_bytes, validate_primer_rows
+from excel_export import export_from_template_bytes, validate_primer_rows
 from fragment_export import build_fragment_length_simple_txt, build_fragment_length_txt, build_non_cds_amplicon_fasta
 from genbank_export import build_genbank_bundle
 from snapgene_export import build_snapgene_dna_bundle, find_snapgene_cli
 from templates_ui import get_default_template_id, get_effective_template_bytes, get_user_templates
+from template_resolver import GLOBAL_DEFAULT_TEMPLATE_PATH, resolve_order_template
+from naming import build_map_filename, construct_from_primer_name
 
 
 def _fmt_tm(v, label):
@@ -185,6 +188,7 @@ def history_page(user, config):
 
     primer_rows = []
     for p in primers:
+        construct_name = construct_from_primer_name(p["primer_name_f"])
         primer_rows.append(
             {
                 "primer_name_f": p["primer_name_f"],
@@ -201,6 +205,9 @@ def history_page(user, config):
                 "insert_seq": p["insert_seq"] or "",
                 "backbone_name": p["backbone_name"] or "",
                 "gene_name": p["gene_name"],
+                "construct_name": construct_name,
+                "plasmid_name": construct_name,
+                "output_filename": build_map_filename(construct_name),
                 "seq_type": p["seq_type"] or params.get("seq_type", ""),
                 "remove_stop": bool(p["remove_stop"]) if p["remove_stop"] is not None else bool(params.get("remove_stop", False)),
                 "construct_type": p["construct_type"] or params.get("construct_type", ""),
@@ -251,18 +258,21 @@ def history_page(user, config):
             key=f"history_export_template_{selected_run}",
         )
         if selected_template_key == "built_in":
-            template_bytes = TEMPLATE_PATH.read_bytes()
-            template_label = "Built-in template"
+            resolved = resolve_order_template(template_path=GLOBAL_DEFAULT_TEMPLATE_PATH)
         else:
-            template_bytes, template_label = get_effective_template_bytes(conn, int(user["id"]), int(selected_template_key))
-        xbytes = export_from_template_bytes(primer_rows, template_bytes=template_bytes, profile=profile)
+            resolved = resolve_order_template(
+                template_id=int(selected_template_key),
+                user_id=int(user["id"]),
+                conn=conn,
+            )
+        xbytes = export_from_template_bytes(primer_rows, template_bytes=resolved.template_bytes, profile=profile)
         st.download_button(
             "Download Sangon Excel (Template)",
             data=xbytes,
             file_name=f"Sangon_Run_{selected_run}.xlsx",
             key=f"history_download_{selected_run}",
         )
-        st.caption(f"Export template: {template_label}")
+        st.caption(f"Export template: {resolved.template_name}")
         frag_txt = build_fragment_length_txt(primer_rows)
         st.download_button(
             "Download Fragment Length TXT",
@@ -287,6 +297,8 @@ def history_page(user, config):
             )
         else:
             st.info("This run has no non-CDS amplicon sequences.")
+
+        sequencing_download(primer_rows, f"history_sequencing_{selected_run}")
 
         st.markdown("#### Construct map export")
         first_seq_type = str(primer_rows[0].get("seq_type") or "CDS").lower() if primer_rows else "cds"
@@ -348,4 +360,3 @@ def history_page(user, config):
         st.error(f"Re-export blocked by validation: {exc}")
 
     conn.close()
-

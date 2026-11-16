@@ -1,0 +1,11 @@
+{
+  "registry_version": 1,
+  "project_root": "projects",
+  "excluded_entries": [
+    {
+      "name": "order_primer.xlsx",
+      "reason": "Shared template, not a project"
+    }
+  ],
+  "projects": []
+}

@@ -249,7 +249,7 @@ def parse_uploaded_records(file) -> list[dict[str, Any]]:
         raise ValueError("Text file is not valid FASTA or plain DNA sequence.")
 
     if lower.endswith((".gb", ".gbk", ".genbank")):
-        bio = io.BytesIO(content)
+        bio = io.StringIO(content.decode("utf-8-sig"))
         records = []
         for rec in SeqIO.parse(bio, "genbank"):
             parsed = _record_to_parsed(rec, file_base_name(name), "genbank")

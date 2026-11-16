@@ -233,8 +233,10 @@ def build_genbank_record(row: dict[str, Any]) -> SeqRecord:
     backbone_name = str(row.get("backbone_name", "")).strip() or "backbone"
     gene_name = str(row.get("gene_name", "")).strip() or "gene"
     insert_name = _resolve_insert_name(row)
-    construct_id = f"{_safe_name(backbone_name)}_{_safe_name(gene_name)}_construct"
-    record = SeqRecord(Seq(seq), id=construct_id, name=construct_id[:16], description=f"{backbone_name} + {gene_name}")
+    plasmid_name = str(row.get("plasmid_name") or "").strip()
+    construct_id = _safe_name(plasmid_name) if plasmid_name else f"{_safe_name(backbone_name)}_{_safe_name(gene_name)}_construct"
+    description = plasmid_name or f"{backbone_name} + {gene_name}"
+    record = SeqRecord(Seq(seq), id=construct_id, name=construct_id[:16], description=description)
     record.annotations["molecule_type"] = "DNA"
     topology = str(row.get("vector_topology") or "").strip().lower()
     record.annotations["topology"] = topology if topology in {"linear", "circular"} else "circular"
@@ -244,7 +246,7 @@ def build_genbank_record(row: dict[str, Any]) -> SeqRecord:
     n = len(seq)
     insert_len = insert_end - insert_start
 
-    record.features.append(_feature(0, max(1, n), "source", organism="synthetic construct", note=f"{backbone_name} + {gene_name}"))
+    record.features.append(_feature(0, max(1, n), "source", organism="synthetic construct", note=description))
     preserved, dropped_count = _remap_vector_features(_load_vector_features(row), replace_start, replace_end, insert_len)
     record.features.extend(preserved)
 
@@ -252,7 +254,12 @@ def build_genbank_record(row: dict[str, Any]) -> SeqRecord:
     insert_note = str(row.get("insert_feature_note") or row.get("map_insert_feature_note") or "Inserted sequence").strip()
     insert_qualifiers: dict[str, Any] = {"label": insert_name, "note": insert_note}
     if insert_type == "CDS":
-        insert_qualifiers["gene"] = insert_name
+        insert_qualifiers["gene"] = str(row.get("insert_gene") or insert_name)
+        if row.get("insert_locus_tag"):
+            insert_qualifiers["locus_tag"] = str(row["insert_locus_tag"])
+        if row.get("insert_translation"):
+            insert_qualifiers["translation"] = str(row["insert_translation"])
+        insert_qualifiers["codon_start"] = "1"
     record.features.append(_feature(insert_start, insert_end, insert_type, **insert_qualifiers))
 
     homology_type = _resolve_homology_feature_type(row)
@@ -321,7 +328,16 @@ def build_genbank_files(rows: list[dict[str, Any]]) -> list[tuple[str, bytes]]:
     files: list[tuple[str, bytes]] = []
     for row in rows:
         record = build_genbank_record(row)
-        file_name = f"{_safe_name(row.get('backbone_name', 'backbone'))}_{_safe_name(row.get('gene_name', 'gene'))}_construct.gbk"
+        output_filename = str(row.get("output_filename") or "").strip()
+        plasmid_name = str(row.get("plasmid_name") or "").strip()
+        if output_filename:
+            file_name = _safe_name(output_filename)
+            if not file_name.lower().endswith(".gbk"):
+                file_name += ".gbk"
+        elif plasmid_name:
+            file_name = f"{_safe_name(plasmid_name)}.gbk"
+        else:
+            file_name = f"{_safe_name(row.get('backbone_name', 'backbone'))}_{_safe_name(row.get('gene_name', 'gene'))}_construct.gbk"
         files.append((file_name, _record_to_gbk_bytes(record)))
     return files
 

@@ -13,7 +13,10 @@ def _resolve_db_path() -> Path:
             p = p / "app.db"
         p.parent.mkdir(parents=True, exist_ok=True)
         return p
-    return Path(__file__).with_name("app.db")
+    from resource_config import state_root
+    target=state_root()/"app.db"
+    target.parent.mkdir(parents=True,exist_ok=True)
+    return target
 
 
 DB_PATH = _resolve_db_path()

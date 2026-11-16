@@ -1,9 +1,11 @@
 import json
 import time
+from pathlib import Path
 
 import streamlit as st
 
 from db import can_delete_backbone, get_conn
+from backbone_presets import BackbonePresetError, get_backbone_preset, list_backbone_presets
 from file_safety import validate_upload
 from primer_design import normalize_seq, revcomp
 from seq_io import parse_uploaded_records
@@ -113,6 +115,82 @@ def _auto_homology_from_sites(vector_sequence: str, site_f: str, site_r: str, ar
     return homo_f, homo_r, f"Auto HOMO arms from unique sites, length={arm_len}."
 
 
+def _preset_preview(preset: dict) -> dict:
+    """Return only registry fields intended for the read-only Web preview."""
+    vector = preset["vector"]
+    cloning = preset["cloning"]
+    homology = cloning["homology"]
+    replacement = cloning["replacement"]
+    fusion = cloning["fusion"]
+    return {
+        "Identity": {
+            "preset_id": preset["preset_id"],
+            "preset_version": preset["preset_version"],
+            "display_name": preset["display_name"],
+            "aliases": ", ".join(preset.get("aliases") or []) or "None",
+            "status": preset["status"],
+            "validation_level": preset["validation_level"],
+            "approved_by_user": bool(preset.get("approved_by_user", False)),
+        },
+        "Vector": {
+            "canonical_file": Path(vector["path"]).name,
+            "sequence_length": vector["sequence_length"],
+            "sha256": vector["sha256"],
+            "topology": vector["topology"],
+            "source_format": vector["source_format"],
+        },
+        "Validated cloning profile": {
+            "insertion_mode": cloning["insertion_mode"],
+            "forward_enzyme_site": f'{cloning["restriction_site_f"]["enzyme"]} / {cloning["restriction_site_f"]["sequence"]}',
+            "reverse_enzyme_site": f'{cloning["restriction_site_r"]["enzyme"]} / {cloning["restriction_site_r"]["sequence"]}',
+            "homology_arm_length": homology["arm_length"],
+            "HOMO_F": homology["homo_f"],
+            "HOMO_R": homology["homo_r"],
+            "replacement_source_feature": replacement["source_feature"],
+            "replacement_boundary": f'{replacement["boundary_start"]}:{replacement["boundary_end"]}',
+            "fusion_order": fusion["order"],
+            "construct_type": fusion["construct_type"],
+        },
+        "Design defaults": dict(preset.get("design_defaults") or {}),
+        "Frame/QC policy": dict(preset.get("qc") or {}),
+    }
+
+
+def _render_shared_validated_presets() -> None:
+    st.markdown("#### Shared versioned presets")
+    st.caption("Read-only versioned presets from the shared registry; selection does not create or update a database backbone.")
+    try:
+        presets = list_backbone_presets()
+    except BackbonePresetError as exc:
+        st.error(f"Shared preset registry unavailable: {exc}")
+        return
+    if not presets:
+        st.info("No shared presets available.")
+        return
+    options = [preset["preset_id"] for preset in presets]
+    selected_id = st.selectbox("Shared preset", options, key="shared_backbone_preset")
+    try:
+        selected = get_backbone_preset(selected_id)
+    except BackbonePresetError as exc:
+        st.error(f"Selected shared preset is unavailable: {exc}")
+        return
+    preview = _preset_preview(selected)
+    st.write("Identity")
+    st.json(preview["Identity"])
+    st.write("Vector")
+    st.json(preview["Vector"])
+    st.write("Validated cloning profile")
+    st.json(preview["Validated cloning profile"])
+    st.write("Design defaults")
+    st.json(preview["Design defaults"])
+    st.write("Frame/QC policy")
+    st.json(preview["Frame/QC policy"])
+    st.info(
+        "nYFP/cYFP v2 是 current、user-approved、computationally verified 的 18 bp profile；"
+        "PHW_3xHA v1 是 validated 18 bp profile。历史 nYFP/cYFP v1 的 21 bp profile 仅可通过显式 version=1 读取。"
+    )
+
+
 def backbones_page(user, config):
     st.subheader("Backbones")
     conn = get_conn()
@@ -120,6 +198,8 @@ def backbones_page(user, config):
         "SELECT * FROM backbones WHERE user_id=? ORDER BY name, enzyme_sites, id",
         (user["id"],),
     ).fetchall()
+
+    _render_shared_validated_presets()
 
     st.markdown("#### Add / Update backbone")
     name = st.text_input("Backbone name", placeholder="e.g., pGreenII", key="bb_name")

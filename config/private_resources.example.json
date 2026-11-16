@@ -1,0 +1,15 @@
+{
+  "projects_root": "projects",
+  "backbone_registry": "presets/config/backbone_presets.yaml",
+  "backbone_root": "presets",
+  "identity_registry": "identity/master.tsv",
+  "construct_master": "identity/constructs.tsv",
+  "rice_annotation": "annotation/primary.tsv",
+  "curated_annotation": "annotation/curated.tsv",
+  "migration_registry": "registries/migrations.json",
+  "order_template": "templates/primer_order.xlsx",
+  "sequencing_template": "templates/sequencing.xlsx",
+  "legacy_sequencing_template": "",
+  "skill_root": "workflow-rules",
+  "state_dir": "state"
+}
