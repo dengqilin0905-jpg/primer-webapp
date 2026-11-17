@@ -1,0 +1,45 @@
+LOCUS       SYNTHETIC_VECTOR        1800 bp    DNA     circular UNK 01-JAN-1980
+DEFINITION  Artificial software fixture; no experimental provenance.
+ACCESSION   SYNTHETIC_VECTOR
+VERSION     SYNTHETIC_VECTOR
+KEYWORDS    .
+SOURCE      .
+  ORGANISM  .
+            .
+FEATURES             Location/Qualifiers
+     misc_feature    401..460
+                     /label="synthetic_placeholder"
+     misc_feature    479..568
+                     /label="synthetic_tag"
+ORIGIN
+        1 gtattatata tcgttttcgg accaaaacat aagggaagtt ggtcgtgctc ggcgcaacgg
+       61 aagaggccca agtttttgcg aatatccatc acgtagtcga acagcccagt gcccgcatcc
+      121 agtccgtttt actccgttga ctcccccata gaccaaggga cctcgcagcg tagcatactc
+      181 cgacgttttg tgttctgagc taagcgagct ggacgaggtc ctgctaccac agaatgactg
+      241 acataagcaa gaagcaagcc caaattcgtc gtaggttcac tttacgcacc ggcttgattt
+      301 tgcgtaggcc ccactcatat ggtaacaacg ttagacttag gcagaccgaa ggcgaaaggg
+      361 cgagttcgct agccttctga caaacaggtt cactactagt ctcagggatt catctcgggg
+      421 tgaagttccc acgttgaact agatggtcac gtggccagtt cccgggacgg gtagctctta
+      481 ctactactac tactactact actactacta ctactactac tactactact actactacta
+      541 ctactactac tactactact actactacta aaccacccag ctgcagagcc tttccggagg
+      601 acgcatgtgc agtaaactgt acagctttca aacacaaatc aatggtgtaa tggacatata
+      661 ttctggtcaa ctagagtgaa gcgtcggtcc gtgactgcga caccacccct gaacgccgac
+      721 gtagtacaaa ctattgcagg tagagacatt atctggtaac acagacttat tgctggaaca
+      781 tataagtcta ggtaccggta cttgggcttc ataacgagcc cgtgtcgcag attagtaacg
+      841 acgaggttaa ctctccgcta acccagcttg aattcaagtc tatcgatctt acggtaatga
+      901 gtcgagttga atggaatctc tgctcgcctg gcagtctcga ctgcgcggtt aagtgctgtg
+      961 aaactctgag gcgcaatata ccatggcact ggattgtaac gatatcttcg tgttgaaata
+     1021 tttcttctaa ttacccgtga gctaatagac cgacttctga gtgtgggcaa gttgtttgca
+     1081 ttggctaaga gttaccgtgt gtgaactgag atgctcataa accgcagggc ctaggcccga
+     1141 tgtagtatcc cgccgatctg tctggaggca cctgtaaaat ccttcacgtc cacgcagaca
+     1201 agtactttta ctgcgtcctc taacaggtac taattgtagt tttgggacca aatcctcaac
+     1261 gagaaccttt ttcggtctag acttccctca agtgcgttcg gtaaggagag agtgcgcata
+     1321 caggcgactt agggacacat acagctttca cagtcaagcc gtctatcgat cacctcccac
+     1381 ctcggtgtcc ggacatgttt ggaagtggtt gagatctcac ccatatcgct ggattctggg
+     1441 ggtcacaaaa caccctgtct agtacttgcc ttggacacga cataccaaag tcacgtaaaa
+     1501 tatgggacgt acctgcgtat cttataggac gcattttttc ctcgttcgcg tatctcaagg
+     1561 ggggcccact aaagtagtca gtaagcaaac cagcctccga tacgcactgg gtactacccg
+     1621 atacggtcca atctgggatc tcaacccgga cgtccctccc gcatccatca ggattccgca
+     1681 agacccgtat ctttgcccgc ctcaatgttt ctcaacatct cgtgtttact ggaggtggca
+     1741 aacctctacg ctctgctacg tcacctagtg ggtaggtgac catatgtgaa caaccggttc
+//

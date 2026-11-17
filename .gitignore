@@ -49,3 +49,39 @@ jbrowse-private/
 Thumbs.db
 .idea/
 .vscode/
+
+# Server deployment runtime state
+data/
+logs/
+backups/
+.env.server
+
+# Sequencing verification private state/results (never publish raw data)
+verification-private/
+private-verification-acceptance/
+*.bam
+*.bai
+*.ab1
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+
+# Installed/build artifacts and private configuration
+*.egg-info/
+build/
+dist/
+*.whl
+private_config.json
+*.private.json
+.private/
+project/
+ex model/
+.primer-verification/
+*.dna
+*.zip
+*.fasta
+*.fa
+*.gbk
+!examples/synthetic_*.fasta
+!examples/synthetic_*.gbk

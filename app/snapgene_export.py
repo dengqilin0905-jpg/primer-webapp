@@ -18,7 +18,6 @@ def _candidate_paths() -> list[Path]:
         paths.append(Path(env_path))
     paths.extend(
         [
-            Path(r"D:\study\snapgene\SnapGene.exe"),
             Path(r"C:\Program Files\SnapGene\SnapGene.exe"),
             Path(r"C:\Program Files\SnapGene.exe"),
             Path(r"C:\Program Files (x86)\SnapGene\SnapGene.exe"),

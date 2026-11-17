@@ -1,12 +1,1 @@
-# Docs
-
-Optional screenshots and operation guides can be stored here.
-
-Suggested docs:
-
-- login/register flow
-- gene import flow
-- mapping design flow
-- template management flow
-- server deployment screenshots
-
+See ../README.md, INSTALLATION.md, PRIVATE_CONFIGURATION.md and SEQUENCING_VERIFICATION.md.

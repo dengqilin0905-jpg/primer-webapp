@@ -1,0 +1,61 @@
+{
+  "registry_version": 1,
+  "current_versions": {
+    "SYN": 1
+  },
+  "presets": [
+    {
+      "preset_id": "SYN",
+      "preset_version": 1,
+      "display_name": "Synthetic demonstration only",
+      "aliases": [],
+      "status": "current",
+      "validation_level": "computational",
+      "approved_by_user": true,
+      "vector": {
+        "path": "examples/synthetic_vector.gbk",
+        "sha256": "b93f9529a56e7452a64057676117701fc27f505a8e9c43ad1c37027254b0c1ba",
+        "sequence_length": 1800,
+        "topology": "circular",
+        "source_format": "genbank"
+      },
+      "cloning": {
+        "insertion_mode": "restriction_site_join",
+        "restriction_site_f": {
+          "enzyme": "SpeI",
+          "sequence": "ACTAGT"
+        },
+        "restriction_site_r": {
+          "enzyme": "SmaI",
+          "sequence": "CCCGGG"
+        },
+        "homology": {
+          "arm_length": 18,
+          "homo_f": "AACAGGTTCACTACTAGT",
+          "homo_r": "AGAGCTACCCGTCCCGGG"
+        },
+        "replacement": {
+          "source_feature": "synthetic_placeholder",
+          "boundary_start": 400,
+          "boundary_end": 460
+        },
+        "fusion": {
+          "order": "target -> synthetic_tag",
+          "architecture": "C-terminal synthetic tag",
+          "construct_type": "C_terminal_tag"
+        }
+      },
+      "design_defaults": {
+        "remove_stop": true
+      },
+      "qc": {
+        "primer_engine_frame_check": false,
+        "fusion_frame_validation": true
+      },
+      "provenance": {
+        "source_project": "synthetic demo",
+        "validation_note": "Artificial software fixture, never a laboratory preset"
+      }
+    }
+  ]
+}

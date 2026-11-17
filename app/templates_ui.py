@@ -4,8 +4,13 @@ import sqlite3
 import streamlit as st
 import openpyxl
 
-from excel_export import TEMPLATE_PATH
 from file_safety import validate_upload
+from template_resolver import (
+    get_default_template_id,
+    get_template_bytes_by_id,
+    get_user_templates,
+    resolve_order_template,
+)
 
 
 ALLOWED_TEMPLATE_EXTS = {".xlsx"}
@@ -25,58 +30,11 @@ def _validate_template_bytes(data: bytes) -> None:
         raise ValueError("Template has no worksheet.")
 
 
-def get_user_templates(conn: sqlite3.Connection, user_id: int):
-    return conn.execute(
-        """
-        SELECT id, user_id, template_name, file_name, is_default, created_at, updated_at
-        FROM order_templates
-        WHERE user_id=?
-        ORDER BY is_default DESC, updated_at DESC, id DESC
-        """,
-        (user_id,),
-    ).fetchall()
-
-
-def get_default_template_id(conn: sqlite3.Connection, user_id: int) -> int | None:
-    row = conn.execute(
-        "SELECT id FROM order_templates WHERE user_id=? AND is_default=1 ORDER BY id DESC LIMIT 1",
-        (user_id,),
-    ).fetchone()
-    return int(row["id"]) if row else None
-
-
-def get_template_bytes_by_id(conn: sqlite3.Connection, user_id: int, template_id: int) -> bytes | None:
-    row = conn.execute(
-        "SELECT template_blob FROM order_templates WHERE user_id=? AND id=?",
-        (user_id, int(template_id)),
-    ).fetchone()
-    if not row:
-        return None
-    return bytes(row["template_blob"])
-
-
 def get_effective_template_bytes(
     conn: sqlite3.Connection, user_id: int, template_id: int | None
 ) -> tuple[bytes, str]:
-    if template_id:
-        data = get_template_bytes_by_id(conn, user_id, int(template_id))
-        if data:
-            row = conn.execute(
-                "SELECT template_name FROM order_templates WHERE user_id=? AND id=?",
-                (user_id, int(template_id)),
-            ).fetchone()
-            name = row["template_name"] if row else f"Template#{template_id}"
-            return data, name
-    default_id = get_default_template_id(conn, user_id)
-    if default_id:
-        data = get_template_bytes_by_id(conn, user_id, default_id)
-        if data:
-            row = conn.execute(
-                "SELECT template_name FROM order_templates WHERE user_id=? AND id=?",
-                (user_id, default_id),
-            ).fetchone()
-            return data, (row["template_name"] if row else "Default template")
-    return TEMPLATE_PATH.read_bytes(), "Built-in template"
+    resolved = resolve_order_template(template_id=template_id, user_id=user_id, conn=conn)
+    return resolved.template_bytes, resolved.template_name
 
 
 def _set_default_template(conn: sqlite3.Connection, user_id: int, template_id: int) -> None:
@@ -166,7 +124,7 @@ def templates_page(user, config):
 
     rows = get_user_templates(conn, user_id)
     if not rows:
-        st.info("No user templates yet. Built-in Sangon template will be used.")
+        st.info("No user templates yet. The default company template will be used.")
         conn.close()
         return
 
@@ -204,4 +162,3 @@ def templates_page(user, config):
                 st.success("Template deleted.")
                 st.rerun()
     conn.close()
-

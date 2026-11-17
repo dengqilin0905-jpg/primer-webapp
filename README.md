@@ -1,169 +1,61 @@
-# Primer Designer (Streamlit + SQLite)
+# Primer WebApp
 
-Primer Designer is a local/internal primer design tool for cloning workflows.
-It keeps per-user private data, supports multi-format sequence import, batch design, Sangon Excel export, and SnapGene-compatible GenBank map export.
+Installable Streamlit software for cloning-primer design, annotated GenBank export, sequencing-order workbooks and independent sequencing verification. It runs without laboratory datasets. All project data and experimental resources belong to the operator and remain outside the software repository.
 
-## Core stack
+## Install and run
 
-- Python
-- Streamlit
-- SQLite
-- Entry: `app/app.py`
-
-## Main features
-
-- User register/login (password hashed with PBKDF2 + salt)
-- Per-user backbone library:
-  - `backbone name`, `HOMO_F`, `HOMO_R`, enzyme label
-  - optional vector map fields:
-    - `vector_sequence`
-    - `insertion_mode`
-    - restriction sites and junction extra bases
-    - map note
-- Gene import:
-  - FASTA/TXT/GenBank/SnapGene `.dna`
-- Design batch modes:
-  - `mapping` mode (existing fine-grained control)
-  - `cartesian` mode (Gene × Backbone combinations)
-- Optional frame check:
-  - in-frame / stop codon / junction shift warnings
-- Exports:
-  - Sangon Excel (`sangon_template.xlsx`, format preserved)
-  - Fragment TXT (full/simple)
-  - non-CDS FASTA
-  - SnapGene-compatible GenBank (`.gbk`) or ZIP bundle for multi-combo runs
-  - optional SnapGene `.dna` map export when SnapGene Desktop CLI is installed on the computer running the app
-- History:
-  - keeps each run with auto status (`pending/success/fail`)
-  - supports re-export
-
-## Local run
-
-### 1) Create venv
+Python 3.11 is the tested runtime. From a source checkout:
 
 ```bash
 python -m venv .venv
+# Linux/macOS: source .venv/bin/activate
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install -r requirements-lock.txt .
+primer-webapp --server.address 127.0.0.1 --server.port 8501
 ```
 
-Windows:
+Open http://127.0.0.1:8501, register a local account and log in. Add your own backbone and import a gene as FASTA, GenBank or SnapGene. Design primers and export the current result; History supports re-export. No bundled experimental backbone or identity registry is needed for custom-backbone design.
+
+The default database is under the current user's `.local/share/primer-webapp/`, outside the install directory. `DB_PATH` overrides it. Keep the listener on localhost unless you have separately configured access control and a reverse proxy.
+
+## Private laboratory resources
+
+Optional validated presets, project catalogs, identity/annotation tables, migration registries and original provider workbooks load from an external JSON file:
 
 ```bash
-.venv\Scripts\activate
+export PRIMER_PRIVATE_CONFIG=/srv/primer-private/resources.json
+export DB_PATH=/srv/primer-private/app.db
+export VERIFICATION_STATE_DIR=/srv/primer-private/verification
+primer-webapp --server.address 127.0.0.1 --server.port 8501
 ```
 
-Linux/macOS:
+For PowerShell use `$env:PRIMER_PRIVATE_CONFIG="C:\primer-private\resources.json"`. See [private resource configuration](docs/PRIVATE_CONFIGURATION.md). Unconfigured catalogs are empty; required missing identity/reference evidence blocks the dependent operation. No fallback scans a personal home directory.
+
+## Features
+
+- Basic/advanced primer controls, explicit stop policy, user backbones and optional validated shared presets.
+- Shared naming and canonical Contract Project assembly with Web/Batch parity.
+- Design Batch, History and Contract sequencing-order exports; Contract provides ZIP and standalone Excel.
+- ZIP result import, content-hash deduplication, explicit reference assignment and separate colony/clone/event histories.
+- Direction/circular-aware independent alignment, regional QC and PASS/FAIL/REVIEW/INCOMPLETE decisions.
+- Feature-preserving GBK, FASTA, alignment coordinates, differences, Excel and HTML with actual aligned bases.
+
+Bundled workbooks are empty **generic software examples**, not current company-authorized submission templates. For formal orders configure the original provider workbook; its formatting, named ranges, validations and allowed antibiotic values are preserved. Existing primers are not redesigned during export.
+
+Native SnapGene sequencing alignment output is not implemented. An ordinary .dna map is never presented as a sequencing alignment.
+
+## Synthetic examples and checks
+
+Everything named `synthetic` is artificial software data and must not be used as a biological reference.
 
 ```bash
-source .venv/bin/activate
+python -B scripts/run_public_tests.py
+python -B scripts/synthetic_smoke.py
+python -B scripts/audit_publication.py
 ```
 
-### 2) Install dependencies
+The synthetic smoke test exercises custom external presets, canonical assembly, Web/Batch parity, order exports and Target PASS without laboratory resources. See [sequencing verification](docs/SEQUENCING_VERIFICATION.md) and [installation](docs/INSTALLATION.md).
 
-```bash
-pip install -r requirements.txt
-```
+## Publication and deployment
 
-`snapgene-reader==0.1.23` is required for `.dna` parsing.
-
-### 3) Start Streamlit
-
-```bash
-streamlit run app/app.py --server.address 127.0.0.1 --server.port 8501
-```
-
-Open:
-
-- <http://127.0.0.1:8501>
-
-## `.dna` import notes
-
-- Upload `.dna` directly in Genes page (or in Backbones vector upload).
-- If `.dna` parse fails, the app shows clear per-file errors and continues processing other files.
-- Binary files mislabeled as `.fa/.txt` are content-checked and routed safely.
-
-## SnapGene `.dna` export notes
-
-- GenBank `.gbk` map export is always generated first and is the stable source format.
-- Native SnapGene `.dna` export is optional and requires SnapGene Desktop on the machine running this app.
-- The app checks `SNAPGENE_EXE` first, then common paths including `D:\study\snapgene\SnapGene.exe` and `C:\Program Files\SnapGene\SnapGene.exe`.
-- For a custom install path on Windows, set an environment variable before starting the app:
-
-```powershell
-$env:SNAPGENE_EXE="D:\path\to\SnapGene.exe"
-streamlit run app/app.py --server.address 127.0.0.1 --server.port 8501
-```
-
-- If SnapGene is not installed or CLI conversion fails, the app still provides the annotated `.gbk` file and shows a Chinese action hint.
-- For the hosted website, users do not need SnapGene locally unless the website server itself is configured with SnapGene Desktop CLI.
-
-## Design workflow
-
-1. Add backbones (with HOMO arms, optional vector sequence and restriction settings).
-2. Import genes.
-3. Go to Design page:
-   - choose `mapping` or `cartesian` batch mode
-   - set Tm/length parameters
-   - optional frame-check options
-4. Generate primers.
-5. Export:
-   - Sangon Excel
-   - GenBank map (`.gbk` / ZIP)
-   - SnapGene DNA map (`.dna` / ZIP) when SnapGene Desktop CLI is available
-
-## Basic vs Advanced design controls
-
-- Basic mode keeps experiment-changing decisions visible:
-  - stop codon removal/retention
-  - Tm min / Tm max / Target Tm
-  - primer length range
-  - homology arm length
-- Advanced mode contains GC limits, ion/Tm profile parameters, frame check, and manual vector/restriction-site details.
-- When a vector sequence is uploaded and the selected restriction sites are unique, the Backbones page can auto-generate HOMO_F/HOMO_R from the selected homology-arm length.
-
-## Canonical local QA data
-
-Use the `test/` folder for release smoke tests:
-
-- Backbone: `pGreenII-62SK.dna`
-- Restriction sites: BamHI / EcoRI
-- Expected 21 bp homology arms:
-  - `CGCTCTAGAACTAGTGGATCC`
-  - `GATAAGCTTGATATCGAATTC`
-- CDS inserts:
-  - `ZmMYBR26.dna`
-  - `ZmMYBS1.dna`
-- Required CDS option: keep terminal stop codon (`remove_stop=False`).
-
-## Sangon Excel export guarantees
-
-- Uses `app/sangon_template.xlsx` as template baseline.
-- Keeps template format, formula, data validation, and headers.
-- Auto-extends rows when primer count exceeds base template range.
-- Resets order header cells `B4:B14` to `0` before every export, then writes only the current user's saved profile fields.
-- Does not inherit personal header values from the built-in template or a user-uploaded template when profile fields are blank.
-- Clears the full order data area before writing primers so each export contains only the current run.
-
-## Repository layout
-
-```text
-app/
-  app.py
-  db.py
-  design_ui.py
-  history_ui.py
-  backbones_ui.py
-  primer_design.py
-  excel_export.py
-  genbank_export.py
-deploy/
-scripts/
-```
-
-## Quick checks
-
-```bash
-python scripts/check_indent.py
-python -m py_compile app/*.py
-python scripts/qa_map_export.py
-```
-
+GitHub CI tests software only. Main pushes do not deploy, no SSH credentials are used by CI, and remote_deploy.sh is disabled. Laboratory deployments are separately approved, versioned installations with external persistent data. See [deployment](DEPLOYMENT.md).

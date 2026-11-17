@@ -48,7 +48,8 @@ def load_config() -> AppConfig:
         default_template_quota = 5
         default_upload_mb = 20
     else:
-        default_temp_dir = os.path.join(os.path.dirname(__file__), "_tmp")
+        from resource_config import state_root
+        default_temp_dir = str(state_root()/"tmp")
         default_template_quota = 0  # 0 means unlimited
         default_upload_mb = 50
 
